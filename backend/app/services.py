@@ -68,6 +68,8 @@ def confirm_occurrence(
     override_narration: Optional[str] = None,
 ) -> Occurrence:
     occ = session.get(Occurrence, occurrence_id)
+    if occ.status == "confirmed":
+        return occ
     if override_amount is not None:
         occ.override_amount = override_amount
     if override_date is not None:

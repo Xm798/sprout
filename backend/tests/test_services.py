@@ -106,3 +106,15 @@ def test_skip_marks_skipped(session, config, today):
     ).first()
     result = services.skip_occurrence(session, occ.id)
     assert result.status == "skipped"
+
+
+def test_confirm_is_idempotent_no_duplicate(session, config, today):
+    sch = _make_schedule(session)
+    services.materialize_occurrences(session, config, today)
+    occ = session.exec(
+        __import__("sqlmodel").select(Occurrence).where(Occurrence.schedule_id == sch.id)
+    ).first()
+    services.confirm_occurrence(session, config, occ.id)
+    services.confirm_occurrence(session, config, occ.id)
+    written = Path(config.ledger_root, "sprout.bean").read_text()
+    assert written.count(occ.sprout_id) == 1
