@@ -4,8 +4,15 @@ from typing import Optional
 
 
 def _fmt_amount(amount: Decimal) -> str:
-    # Preserve the stored precision; strip nothing, no float artifacts.
-    return format(amount, "f")
+    # Use fixed-point; strip trailing zeros from the fractional part but keep
+    # at least 2 decimal places so DB-retrieved Numeric(20,8) values render
+    # as e.g. "15.00" rather than "15.00000000".
+    s = format(amount, "f")
+    if "." in s:
+        integer_part, frac_part = s.split(".")
+        stripped = frac_part.rstrip("0").ljust(2, "0")
+        return f"{integer_part}.{stripped}"
+    return s
 
 
 def format_transaction(
