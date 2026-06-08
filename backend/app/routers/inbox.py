@@ -36,9 +36,8 @@ def inbox(session: Session = Depends(get_session)) -> list[Occurrence]:
 
 @router.get("/{occurrence_id}/preview")
 def preview(occurrence_id: int, session: Session = Depends(get_session)) -> dict:
-    cfg = _config(session)
     try:
-        return {"text": services.build_preview(session, cfg, occurrence_id)}
+        return {"text": services.build_preview(session, occurrence_id)}
     except LookupError as exc:
         raise HTTPException(404, str(exc))
 

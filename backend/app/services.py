@@ -1,6 +1,5 @@
 import datetime
 from decimal import Decimal
-from pathlib import Path
 from typing import Optional
 
 from sqlmodel import Session, select
@@ -46,7 +45,7 @@ def _effective(occ: Occurrence, sch: Schedule):
     return amount, date, narration
 
 
-def build_preview(session: Session, config: AppConfig, occurrence_id: int) -> str:
+def build_preview(session: Session, occurrence_id: int) -> str:
     occ = session.get(Occurrence, occurrence_id)
     if occ is None:
         raise LookupError(f"occurrence {occurrence_id} not found")
@@ -81,7 +80,7 @@ def confirm_occurrence(
     if override_narration is not None:
         occ.override_narration = override_narration
 
-    text = build_preview(session, config, occurrence_id)
+    text = build_preview(session, occurrence_id)
     errors = validate_snippet(config.ledger_main_file, text)
     if errors:
         raise ValueError("; ".join(errors))

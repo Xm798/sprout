@@ -66,7 +66,7 @@ def test_preview_renders_expected_text(session, config, today):
     occ = session.exec(
         __import__("sqlmodel").select(Occurrence).where(Occurrence.schedule_id == sch.id)
     ).first()
-    text = services.build_preview(session, config, occ.id)
+    text = services.build_preview(session, occ.id)
     assert '"Spotify" "sub" #sprout' in text
     assert f'sprout-id: "{occ.sprout_id}"' in text
     assert "Expenses:Subscription  15.00 USD" in text

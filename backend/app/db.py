@@ -1,6 +1,6 @@
 import os
 
-from sqlmodel import SQLModel, Session, create_engine, select
+from sqlmodel import SQLModel, Session, create_engine
 
 from app.config import AppConfig, config_from_env
 from app import models  # noqa: F401  ensure tables are registered
