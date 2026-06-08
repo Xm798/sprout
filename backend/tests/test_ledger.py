@@ -1,4 +1,5 @@
 from app.ledger import load_accounts, load_currencies
+from app.ledger import validate_snippet
 
 
 def test_load_accounts(demo_ledger):
@@ -11,3 +12,32 @@ def test_load_accounts(demo_ledger):
 def test_load_currencies(demo_ledger):
     currencies = load_currencies(demo_ledger)
     assert currencies == ["USD", "CNY"]
+
+
+def test_valid_snippet_has_no_errors(demo_ledger):
+    snippet = (
+        '2026-06-15 * "Spotify" "sub"\n'
+        "  Expenses:Subscription  15.00 USD\n"
+        "  Assets:CreditCard\n"
+    )
+    assert validate_snippet(demo_ledger, snippet) == []
+
+
+def test_unknown_account_is_reported(demo_ledger):
+    snippet = (
+        '2026-06-15 * "X" "y"\n'
+        "  Expenses:DoesNotExist  15.00 USD\n"
+        "  Assets:CreditCard\n"
+    )
+    errors = validate_snippet(demo_ledger, snippet)
+    assert errors  # at least one error about the undeclared account
+
+
+def test_unbalanced_snippet_is_reported(demo_ledger):
+    snippet = (
+        '2026-06-15 * "X" "y"\n'
+        "  Expenses:Subscription  15.00 USD\n"
+        "  Assets:CreditCard  -10.00 USD\n"
+    )
+    errors = validate_snippet(demo_ledger, snippet)
+    assert errors
