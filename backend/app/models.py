@@ -8,11 +8,10 @@ from sqlmodel import SQLModel, Field
 AMOUNT = lambda nullable: Column(Numeric(20, 8), nullable=nullable)  # noqa: E731
 
 
-class Schedule(SQLModel, table=True):
-    id: Optional[int] = Field(default=None, primary_key=True)
+class ScheduleBase(SQLModel):
     name: str
     narration: str = ""
-    amount: Decimal = Field(sa_column=AMOUNT(False))
+    amount: Decimal = Field(max_digits=20, decimal_places=8)
     currency: str
     from_account: str
     to_account: str
@@ -23,8 +22,16 @@ class Schedule(SQLModel, table=True):
     max_count: Optional[int] = None
     tags: str = ""  # comma-separated tag names (no '#')
     status: str = "active"  # active | paused
+
+
+class Schedule(ScheduleBase, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
     created_at: datetime.datetime = Field(default_factory=datetime.datetime.now)
     updated_at: datetime.datetime = Field(default_factory=datetime.datetime.now)
+
+
+class ScheduleCreate(ScheduleBase):
+    pass
 
 
 class Occurrence(SQLModel, table=True):
