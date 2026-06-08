@@ -37,7 +37,10 @@ def inbox(session: Session = Depends(get_session)) -> list[Occurrence]:
 @router.get("/{occurrence_id}/preview")
 def preview(occurrence_id: int, session: Session = Depends(get_session)) -> dict:
     cfg = _config(session)
-    return {"text": services.build_preview(session, cfg, occurrence_id)}
+    try:
+        return {"text": services.build_preview(session, cfg, occurrence_id)}
+    except LookupError as exc:
+        raise HTTPException(404, str(exc))
 
 
 @router.post("/{occurrence_id}/confirm", response_model=Occurrence)
@@ -51,10 +54,15 @@ def confirm(occurrence_id: int, body: ConfirmBody, session: Session = Depends(ge
             override_date=body.override_date,
             override_narration=body.override_narration,
         )
+    except LookupError as exc:
+        raise HTTPException(404, str(exc))
     except ValueError as exc:
         raise HTTPException(422, str(exc))
 
 
 @router.post("/{occurrence_id}/skip", response_model=Occurrence)
 def skip(occurrence_id: int, session: Session = Depends(get_session)) -> Occurrence:
-    return services.skip_occurrence(session, occurrence_id)
+    try:
+        return services.skip_occurrence(session, occurrence_id)
+    except LookupError as exc:
+        raise HTTPException(404, str(exc))

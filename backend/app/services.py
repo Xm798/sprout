@@ -48,6 +48,8 @@ def _effective(occ: Occurrence, sch: Schedule):
 
 def build_preview(session: Session, config: AppConfig, occurrence_id: int) -> str:
     occ = session.get(Occurrence, occurrence_id)
+    if occ is None:
+        raise LookupError(f"occurrence {occurrence_id} not found")
     sch = session.get(Schedule, occ.schedule_id)
     amount, date, narration = _effective(occ, sch)
     tags = [t for t in sch.tags.split(",") if t]
@@ -68,6 +70,8 @@ def confirm_occurrence(
     override_narration: Optional[str] = None,
 ) -> Occurrence:
     occ = session.get(Occurrence, occurrence_id)
+    if occ is None:
+        raise LookupError(f"occurrence {occurrence_id} not found")
     if occ.status == "confirmed":
         return occ
     if override_amount is not None:
@@ -98,6 +102,8 @@ def confirm_occurrence(
 
 def skip_occurrence(session: Session, occurrence_id: int) -> Occurrence:
     occ = session.get(Occurrence, occurrence_id)
+    if occ is None:
+        raise LookupError(f"occurrence {occurrence_id} not found")
     occ.status = "skipped"
     session.add(occ)
     session.commit()

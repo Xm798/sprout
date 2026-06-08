@@ -87,3 +87,15 @@ def test_get_and_update_config(client):
     assert cfg["write_mode"] == "single_file"
     r = client.put("/config", json={**cfg, "lookahead_days": 7})
     assert r.json()["lookahead_days"] == 7
+
+
+def test_preview_missing_occurrence_404(client):
+    assert client.get("/inbox/99999/preview").status_code == 404
+
+
+def test_confirm_missing_occurrence_404(client):
+    assert client.post("/inbox/99999/confirm", json={}).status_code == 404
+
+
+def test_skip_missing_occurrence_404(client):
+    assert client.post("/inbox/99999/skip").status_code == 404
