@@ -45,15 +45,15 @@ def _new_schedule_payload():
 
 
 def test_create_and_list_schedules(client):
-    r = client.post("/schedules", json=_new_schedule_payload())
+    r = client.post("/api/schedules", json=_new_schedule_payload())
     assert r.status_code == 200, r.text
     sid = r.json()["id"]
-    assert client.get("/schedules").json()[0]["id"] == sid
+    assert client.get("/api/schedules").json()[0]["id"] == sid
 
 
 def test_inbox_lists_pending(client):
-    client.post("/schedules", json=_new_schedule_payload())
-    r = client.get("/inbox")
+    client.post("/api/schedules", json=_new_schedule_payload())
+    r = client.get("/api/inbox")
     assert r.status_code == 200
     items = r.json()
     assert len(items) >= 1
@@ -61,41 +61,41 @@ def test_inbox_lists_pending(client):
 
 
 def test_preview_then_confirm(client):
-    client.post("/schedules", json=_new_schedule_payload())
-    occ_id = client.get("/inbox").json()[0]["id"]
-    prev = client.get(f"/inbox/{occ_id}/preview")
+    client.post("/api/schedules", json=_new_schedule_payload())
+    occ_id = client.get("/api/inbox").json()[0]["id"]
+    prev = client.get(f"/api/inbox/{occ_id}/preview")
     assert "Expenses:Subscription" in prev.json()["text"]
-    r = client.post(f"/inbox/{occ_id}/confirm", json={})
+    r = client.post(f"/api/inbox/{occ_id}/confirm", json={})
     assert r.status_code == 200
     assert r.json()["status"] == "confirmed"
 
 
 def test_skip(client):
-    client.post("/schedules", json=_new_schedule_payload())
-    occ_id = client.get("/inbox").json()[0]["id"]
-    r = client.post(f"/inbox/{occ_id}/skip")
+    client.post("/api/schedules", json=_new_schedule_payload())
+    occ_id = client.get("/api/inbox").json()[0]["id"]
+    r = client.post(f"/api/inbox/{occ_id}/skip")
     assert r.json()["status"] == "skipped"
 
 
 def test_accounts_and_currencies(client):
-    assert "Assets:CreditCard" in client.get("/accounts").json()
-    assert client.get("/currencies").json() == ["USD", "CNY"]
+    assert "Assets:CreditCard" in client.get("/api/accounts").json()
+    assert client.get("/api/currencies").json() == ["USD", "CNY"]
 
 
 def test_get_and_update_config(client):
-    cfg = client.get("/config").json()
+    cfg = client.get("/api/config").json()
     assert cfg["write_mode"] == "single_file"
-    r = client.put("/config", json={**cfg, "lookahead_days": 7})
+    r = client.put("/api/config", json={**cfg, "lookahead_days": 7})
     assert r.json()["lookahead_days"] == 7
 
 
 def test_preview_missing_occurrence_404(client):
-    assert client.get("/inbox/99999/preview").status_code == 404
+    assert client.get("/api/inbox/99999/preview").status_code == 404
 
 
 def test_confirm_missing_occurrence_404(client):
-    assert client.post("/inbox/99999/confirm", json={}).status_code == 404
+    assert client.post("/api/inbox/99999/confirm", json={}).status_code == 404
 
 
 def test_skip_missing_occurrence_404(client):
-    assert client.post("/inbox/99999/skip").status_code == 404
+    assert client.post("/api/inbox/99999/skip").status_code == 404
