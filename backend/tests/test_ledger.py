@@ -14,6 +14,22 @@ def test_load_currencies(demo_ledger):
     assert currencies == ["USD", "CNY"]
 
 
+def test_load_currencies_includes_referenced_commodities(tmp_path):
+    ledger = tmp_path / "ledger.bean"
+    ledger.write_text(
+        'option "operating_currency" "USD"\n\n'
+        "2020-01-01 commodity EUR\n"
+        "2020-01-01 open Assets:Cash\n"
+        "2020-01-01 open Assets:Euro EUR\n"
+        "2020-01-01 open Expenses:Misc\n\n"
+        '2021-01-01 * "x"\n'
+        "  Expenses:Misc   10.00 GBP\n"
+        "  Assets:Cash    -10.00 GBP\n"
+    )
+    # Operating currency first, other referenced commodities appended sorted.
+    assert load_currencies(str(ledger)) == ["USD", "EUR", "GBP"]
+
+
 def test_valid_snippet_has_no_errors(demo_ledger):
     snippet = (
         '2026-06-15 * "Spotify" "sub"\n'

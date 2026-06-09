@@ -16,8 +16,35 @@ def load_accounts(path: str) -> list[str]:
 
 
 def load_currencies(path: str) -> list[str]:
-    _entries, _errors, options_map = _load(path)
-    return list(options_map.get("operating_currency", []))
+    """Currencies to suggest for new schedules.
+
+    Operating currencies come first (in declared order); then any other
+    commodity the ledger actually references — ``commodity`` directives,
+    account ``open`` constraints, and posting units — appended alphabetically.
+    """
+    entries, _errors, options_map = _load(path)
+    operating = list(options_map.get("operating_currency", []))
+    seen = set(operating)
+    extra: set[str] = set()
+
+    def add(currency: str | None) -> None:
+        if currency and currency not in seen:
+            seen.add(currency)
+            extra.add(currency)
+
+    for e in entries:
+        if isinstance(e, data.Commodity):
+            add(e.currency)
+        elif isinstance(e, data.Open) and e.currencies:
+            for c in e.currencies:
+                add(c)
+        elif isinstance(e, data.Transaction):
+            for posting in e.postings:
+                units = getattr(posting, "units", None)
+                if units is not None:
+                    add(getattr(units, "currency", None))
+
+    return operating + sorted(extra)
 
 
 def _error_messages(errors) -> list[str]:
