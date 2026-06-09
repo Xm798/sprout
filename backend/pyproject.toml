@@ -9,6 +9,7 @@ dependencies = [
     "sqlmodel>=0.0.22",
     "beancount>=3.2",
     "python-dateutil>=2.9",
+    "psycopg[binary]>=3.2",
 ]
 
 [project.optional-dependencies]
