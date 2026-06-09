@@ -15,6 +15,12 @@ vi.mock("../api/client", () => ({
 
 afterEach(() => vi.clearAllMocks());
 
+function todayIso() {
+  const d = new Date();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
 test("submits a new schedule with the entered values", async () => {
   const user = userEvent.setup();
   renderWithProviders(<ScheduleForm />);
@@ -23,7 +29,11 @@ test("submits a new schedule with the entered values", async () => {
   await user.type(screen.getByLabelText(/^amount$/i), "15.00");
   await user.type(screen.getByLabelText(/from account/i), "Assets:CreditCard");
   await user.type(screen.getByLabelText(/to account/i), "Expenses:Subscription");
-  await user.type(screen.getByLabelText(/starting from/i), "2026-01-15");
+
+  // The date field is a calendar popover; pick "Today".
+  await user.click(screen.getByLabelText(/starting from/i));
+  await user.click(await screen.findByRole("button", { name: /today/i }));
+
   await user.click(screen.getByRole("button", { name: /create schedule/i }));
 
   await waitFor(() => expect(api.createSchedule).toHaveBeenCalledTimes(1));
@@ -33,7 +43,7 @@ test("submits a new schedule with the entered values", async () => {
     amount: "15.00",
     from_account: "Assets:CreditCard",
     to_account: "Expenses:Subscription",
-    anchor_date: "2026-01-15",
+    anchor_date: todayIso(),
     interval_unit: "month",
     interval_count: 1,
   });

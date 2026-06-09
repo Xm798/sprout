@@ -4,6 +4,8 @@ import type { FormEvent } from "react";
 import { useAccounts, useCreateSchedule, useCurrencies } from "@/api/hooks";
 import type { IntervalUnit, ScheduleCreate } from "@/api/types";
 import { Button } from "@/components/ui/button";
+import { Combobox } from "@/components/ui/combobox";
+import { DatePicker } from "@/components/ui/date-picker";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -37,6 +39,9 @@ export function ScheduleForm({ onCreated }: { onCreated?: () => void }) {
   const accounts = useAccounts();
   const currencies = useCurrencies();
   const create = useCreateSchedule();
+
+  const accountOptions = accounts.data ?? [];
+  const currencyOptions = currencies.data ?? [];
 
   function set<K extends keyof ScheduleCreate>(
     key: K,
@@ -81,54 +86,45 @@ export function ScheduleForm({ onCreated }: { onCreated?: () => void }) {
           />
         </div>
         <div className="space-y-1.5">
-          <Label>Currency</Label>
-          <Select
+          <Label htmlFor="sf-currency">Currency</Label>
+          <Combobox
+            id="sf-currency"
+            aria-label="Currency"
             value={form.currency}
-            onValueChange={(v) => set("currency", v)}
-          >
-            <SelectTrigger aria-label="Currency">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {(currencies.data ?? [form.currency]).map((c) => (
-                <SelectItem key={c} value={c}>
-                  {c}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+            onChange={(v) => set("currency", v)}
+            suggestions={currencyOptions}
+            transform={(v) => v.toUpperCase()}
+            placeholder="USD"
+          />
         </div>
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2">
         <div className="space-y-1.5">
           <Label htmlFor="sf-from">From account</Label>
-          <Input
+          <Combobox
             id="sf-from"
+            aria-label="From account"
             required
-            list="accounts"
-            placeholder="Assets:Bank"
             value={form.from_account}
-            onChange={(e) => set("from_account", e.target.value)}
+            onChange={(v) => set("from_account", v)}
+            suggestions={accountOptions}
+            placeholder="Assets:Bank"
           />
         </div>
         <div className="space-y-1.5">
           <Label htmlFor="sf-to">To account</Label>
-          <Input
+          <Combobox
             id="sf-to"
+            aria-label="To account"
             required
-            list="accounts"
-            placeholder="Expenses:Subscriptions"
             value={form.to_account}
-            onChange={(e) => set("to_account", e.target.value)}
+            onChange={(v) => set("to_account", v)}
+            suggestions={accountOptions}
+            placeholder="Expenses:Subscriptions"
           />
         </div>
       </div>
-      <datalist id="accounts">
-        {(accounts.data ?? []).map((a) => (
-          <option key={a} value={a} />
-        ))}
-      </datalist>
 
       <div className="space-y-1.5">
         <Label htmlFor="sf-narration">Narration</Label>
@@ -170,12 +166,11 @@ export function ScheduleForm({ onCreated }: { onCreated?: () => void }) {
 
       <div className="space-y-1.5">
         <Label htmlFor="sf-anchor">Starting from</Label>
-        <Input
+        <DatePicker
           id="sf-anchor"
-          type="date"
-          required
+          aria-label="Starting from"
           value={form.anchor_date}
-          onChange={(e) => set("anchor_date", e.target.value)}
+          onChange={(v) => set("anchor_date", v)}
         />
       </div>
 

@@ -7,6 +7,7 @@ import type { Occurrence, Schedule } from "@/api/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { DatePicker } from "@/components/ui/date-picker";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
@@ -158,11 +159,11 @@ export function InboxRow({
             </div>
             <div className="space-y-1.5">
               <Label htmlFor={`${fieldId}-date`}>Date</Label>
-              <Input
+              <DatePicker
                 id={`${fieldId}-date`}
-                type="date"
+                aria-label="Override date"
                 value={date}
-                onChange={(e) => setDate(e.target.value)}
+                onChange={setDate}
               />
             </div>
             <div className="space-y-1.5">
