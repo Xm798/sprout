@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
@@ -44,13 +44,26 @@ def _safe_static_path(full_path: str, static_root: Path) -> Path:
     return index
 
 
+def mount_spa(target: FastAPI, static_dir: Path) -> None:
+    """Register a catch-all that serves the built SPA from ``static_dir``.
+
+    Unknown ``/api/*`` paths return 404 rather than falling through to the SPA,
+    so API misses keep proper HTTP semantics; everything else falls back to
+    ``index.html`` for client-side routing. Mount this AFTER the API routers so
+    real API routes match first.
+    """
+    static_root = static_dir.resolve()
+
+    @target.get("/{full_path:path}")
+    def spa(full_path: str) -> FileResponse:
+        if full_path == "api" or full_path.startswith("api/"):
+            raise HTTPException(status_code=404, detail="Not Found")
+        return FileResponse(_safe_static_path(full_path, static_root))
+
+
 # Serve the built SPA when a static dir is present (production single-image deploy).
 # Absent in dev/test, so this block is skipped there and the API tests are unaffected.
 _STATIC_DIR = Path(os.getenv("SPROUT_STATIC_DIR", "static"))
 
 if _STATIC_DIR.is_dir():
-    _STATIC_ROOT = _STATIC_DIR.resolve()
-
-    @app.get("/{full_path:path}")
-    def spa(full_path: str) -> FileResponse:
-        return FileResponse(_safe_static_path(full_path, _STATIC_ROOT))
+    mount_spa(app, _STATIC_DIR)

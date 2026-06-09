@@ -30,3 +30,30 @@ def test_path_traversal_is_blocked(tmp_path):
     # never resolve to a file outside the served directory.
     result = _safe_static_path("../../../../etc/passwd", root)
     assert result == root / "index.html"
+
+
+def test_mount_spa_serves_index_and_blocks_unknown_api(tmp_path):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from app.main import mount_spa
+
+    (tmp_path / "index.html").write_text('<div id="root"></div>')
+
+    app = FastAPI()
+
+    @app.get("/api/ping")
+    def ping():
+        return {"ok": True}
+
+    mount_spa(app, tmp_path)
+    client = TestClient(app)
+
+    # A real API route still wins over the SPA catch-all.
+    assert client.get("/api/ping").json() == {"ok": True}
+    # An unknown API path returns 404 instead of falling through to the SPA index.
+    assert client.get("/api/does-not-exist").status_code == 404
+    # A SPA deep link falls back to index.html.
+    spa_resp = client.get("/settings")
+    assert spa_resp.status_code == 200
+    assert "root" in spa_resp.text
