@@ -1,6 +1,32 @@
 import { useState } from "react";
-import { useConfirm, usePreview, useSkip } from "../api/hooks";
-import type { Occurrence, Schedule } from "../api/types";
+import { ArrowRight, Check, ChevronDown, SkipForward } from "lucide-react";
+import { toast } from "sonner";
+
+import { useConfirm, usePreview, useSkip } from "@/api/hooks";
+import type { Occurrence, Schedule } from "@/api/types";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Separator } from "@/components/ui/separator";
+import { cn, formatAmount } from "@/lib/utils";
+
+function formatDate(value: string) {
+  const d = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return value;
+  return d.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+function leaf(account?: string) {
+  if (!account) return "—";
+  const parts = account.split(":");
+  return parts[parts.length - 1] || account;
+}
 
 export function InboxRow({
   occurrence,
@@ -18,96 +44,154 @@ export function InboxRow({
   const skip = useSkip();
   const preview = usePreview(occurrence.id, expanded);
 
+  const name = schedule?.name ?? `Schedule ${occurrence.schedule_id}`;
   const baseAmount = occurrence.override_amount ?? schedule?.amount ?? "";
   const effectiveDate = occurrence.override_date ?? occurrence.due_date;
+  const fieldId = `occ-${occurrence.id}`;
 
   function onConfirm() {
-    confirm.mutate({
-      id: occurrence.id,
-      body: {
-        override_amount: amount || null,
-        override_date: date || null,
-        override_narration: narration || null,
+    confirm.mutate(
+      {
+        id: occurrence.id,
+        body: {
+          override_amount: amount || null,
+          override_date: date || null,
+          override_narration: narration || null,
+        },
       },
+      {
+        onSuccess: () => toast.success(`Confirmed ${name}`),
+        onError: (e) =>
+          toast.error(`Couldn't confirm ${name}`, {
+            description: String(e),
+          }),
+      }
+    );
+  }
+
+  function onSkip() {
+    skip.mutate(occurrence.id, {
+      onSuccess: () => toast(`Skipped ${name}`),
     });
   }
 
   return (
-    <div className="mb-2 rounded border p-3">
-      <div className="flex items-center justify-between">
-        <div>
-          <div className="font-medium">
-            {schedule?.name ?? `Schedule ${occurrence.schedule_id}`}
+    <Card className="overflow-hidden transition-shadow hover:shadow-lift">
+      <div className="flex flex-wrap items-start justify-between gap-4 p-4 sm:p-5">
+        <div className="min-w-0 space-y-2">
+          <div className="flex items-center gap-2">
+            <h3 className="truncate font-display text-base font-semibold">
+              {name}
+            </h3>
+            <Badge variant="warning" className="capitalize">
+              {occurrence.status}
+            </Badge>
           </div>
-          <div className="text-sm text-gray-600">
-            {effectiveDate} · {String(baseAmount)} {schedule?.currency ?? ""}
+          <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
+            <span>{leaf(schedule?.from_account)}</span>
+            <ArrowRight className="h-3.5 w-3.5 shrink-0 opacity-70" />
+            <span>{leaf(schedule?.to_account)}</span>
           </div>
-          <div className="text-xs text-gray-500">
-            {schedule?.to_account} ← {schedule?.from_account}
-          </div>
+          <p className="text-xs text-muted-foreground">
+            Due {formatDate(effectiveDate)}
+          </p>
         </div>
-        <div className="flex gap-2">
-          <button
-            className="text-sm underline"
-            onClick={() => setExpanded((v) => !v)}
-          >
-            {expanded ? "Hide" : "Preview"}
-          </button>
-          <button
-            className="rounded bg-green-600 px-3 py-1 text-white disabled:opacity-50"
-            onClick={onConfirm}
-            disabled={confirm.isPending}
-          >
-            Confirm
-          </button>
-          <button
-            className="rounded border px-3 py-1 disabled:opacity-50"
-            onClick={() => skip.mutate(occurrence.id)}
-            disabled={skip.isPending}
-          >
-            Skip
-          </button>
+
+        <div className="text-right">
+          <div className="font-mono text-lg font-semibold tabular-nums">
+            {formatAmount(baseAmount, schedule?.currency)}
+          </div>
         </div>
       </div>
 
+      <Separator />
+
+      <div className="flex flex-wrap items-center gap-2 p-3 sm:px-5">
+        <Button
+          size="sm"
+          onClick={onConfirm}
+          disabled={confirm.isPending}
+          className="flex-1 sm:flex-none"
+        >
+          <Check className="h-4 w-4" />
+          Confirm
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={onSkip}
+          disabled={skip.isPending}
+          className="flex-1 sm:flex-none"
+        >
+          <SkipForward className="h-4 w-4" />
+          Skip
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="ml-auto text-muted-foreground"
+          aria-expanded={expanded}
+          onClick={() => setExpanded((v) => !v)}
+        >
+          {expanded ? "Hide" : "Preview"}
+          <ChevronDown
+            className={cn(
+              "h-4 w-4 transition-transform",
+              expanded && "rotate-180"
+            )}
+          />
+        </Button>
+      </div>
+
       {expanded && (
-        <div className="mt-3 space-y-2">
-          <div className="grid grid-cols-3 gap-2">
-            <label className="text-sm">
-              Amount
-              <input
-                className="w-full rounded border px-2 py-1"
+        <div className="space-y-4 border-t border-border/60 bg-muted/30 p-4 sm:p-5">
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div className="space-y-1.5">
+              <Label htmlFor={`${fieldId}-amount`}>Amount</Label>
+              <Input
+                id={`${fieldId}-amount`}
+                inputMode="decimal"
                 placeholder={String(baseAmount)}
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
               />
-            </label>
-            <label className="text-sm">
-              Date
-              <input
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor={`${fieldId}-date`}>Date</Label>
+              <Input
+                id={`${fieldId}-date`}
                 type="date"
-                className="w-full rounded border px-2 py-1"
                 value={date}
                 onChange={(e) => setDate(e.target.value)}
               />
-            </label>
-            <label className="text-sm">
-              Narration
-              <input
-                className="w-full rounded border px-2 py-1"
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor={`${fieldId}-narration`}>Narration</Label>
+              <Input
+                id={`${fieldId}-narration`}
+                placeholder="Override narration"
                 value={narration}
                 onChange={(e) => setNarration(e.target.value)}
               />
-            </label>
+            </div>
           </div>
-          <pre className="overflow-auto rounded border bg-gray-50 p-2 text-xs">
-            {preview.isLoading ? "Loading…" : preview.data?.text ?? ""}
-          </pre>
+
+          <div className="space-y-1.5">
+            <Label>Beancount preview</Label>
+            <pre className="max-h-56 overflow-auto rounded-lg border border-border/60 bg-background/80 p-3 font-mono text-xs leading-relaxed text-foreground/90">
+              {preview.isLoading
+                ? "Loading…"
+                : preview.isError
+                  ? "Failed to render preview."
+                  : preview.data?.text ?? ""}
+            </pre>
+          </div>
+
           {confirm.isError && (
-            <div className="text-sm text-red-600">{String(confirm.error)}</div>
+            <p className="text-sm text-destructive">{String(confirm.error)}</p>
           )}
         </div>
       )}
-    </div>
+    </Card>
   );
 }

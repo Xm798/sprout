@@ -1,3 +1,124 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 105 24% 97%;
+    --foreground: 165 28% 13%;
+
+    --card: 120 33% 99%;
+    --card-foreground: 165 28% 13%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 165 28% 13%;
+
+    --primary: 158 72% 38%;
+    --primary-foreground: 150 50% 98%;
+
+    --secondary: 145 30% 93%;
+    --secondary-foreground: 165 30% 18%;
+
+    --muted: 140 20% 94%;
+    --muted-foreground: 155 9% 42%;
+
+    --accent: 152 44% 91%;
+    --accent-foreground: 162 40% 18%;
+
+    --destructive: 4 72% 52%;
+    --destructive-foreground: 0 0% 100%;
+
+    --success: 152 62% 40%;
+    --success-foreground: 150 50% 98%;
+
+    --warning: 36 92% 48%;
+    --warning-foreground: 40 60% 12%;
+
+    --border: 142 18% 87%;
+    --input: 142 18% 86%;
+    --ring: 158 72% 38%;
+
+    --shadow: 162 35% 22%;
+    --radius: 0.85rem;
+  }
+
+  .dark {
+    --background: 168 30% 7%;
+    --foreground: 140 22% 92%;
+
+    --card: 167 26% 10%;
+    --card-foreground: 140 22% 92%;
+
+    --popover: 167 28% 9%;
+    --popover-foreground: 140 22% 92%;
+
+    --primary: 156 64% 46%;
+    --primary-foreground: 165 60% 7%;
+
+    --secondary: 165 20% 16%;
+    --secondary-foreground: 140 22% 92%;
+
+    --muted: 166 18% 15%;
+    --muted-foreground: 150 12% 62%;
+
+    --accent: 165 24% 17%;
+    --accent-foreground: 140 30% 90%;
+
+    --destructive: 4 64% 52%;
+    --destructive-foreground: 0 0% 100%;
+
+    --success: 154 56% 46%;
+    --success-foreground: 165 60% 7%;
+
+    --warning: 38 90% 56%;
+    --warning-foreground: 40 60% 10%;
+
+    --border: 166 16% 19%;
+    --input: 166 16% 20%;
+    --ring: 156 64% 46%;
+
+    --shadow: 0 0% 0%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    font-feature-settings: "ss01", "cv05";
+    /* Soft layered atmosphere — emerald light bleeding in from the corners. */
+    background-image:
+      radial-gradient(
+        62rem 42rem at 8% -8%,
+        hsl(var(--primary) / 0.1),
+        transparent 60%
+      ),
+      radial-gradient(
+        48rem 38rem at 110% 4%,
+        hsl(152 60% 50% / 0.08),
+        transparent 55%
+      );
+    background-attachment: fixed;
+  }
+
+  ::selection {
+    background: hsl(var(--primary) / 0.22);
+  }
+}
+
+@layer utilities {
+  /* Respect the iOS home indicator / notch for the mobile tab bar. */
+  .pb-safe {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .h-safe-bottom {
+    height: env(safe-area-inset-bottom);
+  }
+}

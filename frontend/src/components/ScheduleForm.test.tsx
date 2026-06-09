@@ -19,11 +19,11 @@ test("submits a new schedule with the entered values", async () => {
   const user = userEvent.setup();
   renderWithProviders(<ScheduleForm />);
 
-  await user.type(screen.getByLabelText("name"), "Spotify");
-  await user.type(screen.getByLabelText("amount"), "15.00");
-  await user.type(screen.getByLabelText("from_account"), "Assets:CreditCard");
-  await user.type(screen.getByLabelText("to_account"), "Expenses:Subscription");
-  await user.type(screen.getByLabelText("anchor_date"), "2026-01-15");
+  await user.type(screen.getByLabelText(/^name$/i), "Spotify");
+  await user.type(screen.getByLabelText(/^amount$/i), "15.00");
+  await user.type(screen.getByLabelText(/from account/i), "Assets:CreditCard");
+  await user.type(screen.getByLabelText(/to account/i), "Expenses:Subscription");
+  await user.type(screen.getByLabelText(/starting from/i), "2026-01-15");
   await user.click(screen.getByRole("button", { name: /create schedule/i }));
 
   await waitFor(() => expect(api.createSchedule).toHaveBeenCalledTimes(1));

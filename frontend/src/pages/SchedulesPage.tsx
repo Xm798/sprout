@@ -1,36 +1,183 @@
-import { useSchedules, useDeleteSchedule } from "../api/hooks";
-import { ScheduleForm } from "../components/ScheduleForm";
+import { useState } from "react";
+import { CalendarPlus, Plus, Repeat, Trash2 } from "lucide-react";
+import { toast } from "sonner";
+
+import { useDeleteSchedule, useSchedules } from "@/api/hooks";
+import type { Schedule } from "@/api/types";
+import { ScheduleForm } from "@/components/ScheduleForm";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet";
+import { Skeleton } from "@/components/ui/skeleton";
+import { useMediaQuery } from "@/hooks/use-media-query";
+import { formatAmount } from "@/lib/utils";
+
+function intervalLabel(s: Schedule) {
+  const unit = s.interval_count === 1 ? s.interval_unit : `${s.interval_unit}s`;
+  return s.interval_count === 1
+    ? `Every ${unit}`
+    : `Every ${s.interval_count} ${unit}`;
+}
+
+function ScheduleCard({ schedule }: { schedule: Schedule }) {
+  const del = useDeleteSchedule();
+  return (
+    <Card className="group transition-shadow hover:shadow-lift">
+      <CardContent className="flex items-center justify-between gap-3 p-4 sm:p-5">
+        <div className="flex min-w-0 items-center gap-3">
+          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary">
+            <Repeat className="h-5 w-5" />
+          </span>
+          <div className="min-w-0 space-y-1">
+            <p className="truncate font-display text-base font-semibold">
+              {schedule.name}
+            </p>
+            <div className="flex flex-wrap items-center gap-1.5">
+              <Badge variant="outline">{intervalLabel(schedule)}</Badge>
+              <span className="truncate text-xs text-muted-foreground">
+                {schedule.from_account} → {schedule.to_account}
+              </span>
+            </div>
+          </div>
+        </div>
+        <div className="flex shrink-0 flex-col items-end gap-1.5">
+          <span className="font-mono text-sm font-semibold tabular-nums">
+            {formatAmount(schedule.amount, schedule.currency)}
+          </span>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8 text-muted-foreground hover:text-destructive"
+            aria-label={`Delete ${schedule.name}`}
+            disabled={del.isPending}
+            onClick={() =>
+              del.mutate(schedule.id, {
+                onSuccess: () => toast(`Deleted ${schedule.name}`),
+              })
+            }
+          >
+            <Trash2 className="h-4 w-4" />
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
 
 export function SchedulesPage() {
   const schedules = useSchedules();
-  const del = useDeleteSchedule();
+  const [open, setOpen] = useState(false);
+  const isDesktop = useMediaQuery("(min-width: 768px)");
+  const list = schedules.data ?? [];
+
+  const trigger = (
+    <Button>
+      <Plus className="h-4 w-4" />
+      New schedule
+    </Button>
+  );
+
+  const form = <ScheduleForm onCreated={() => setOpen(false)} />;
 
   return (
-    <div className="space-y-4 p-4">
-      <h1 className="text-xl font-semibold">Schedules</h1>
-      <ScheduleForm />
-      {schedules.isLoading ? (
-        <div>Loading…</div>
-      ) : (
-        <ul className="space-y-1">
-          {(schedules.data ?? []).map((s) => (
-            <li
-              key={s.id}
-              className="flex items-center justify-between rounded border px-3 py-2"
+    <div className="mx-auto max-w-2xl space-y-6">
+      <header className="flex flex-wrap items-end justify-between gap-4">
+        <div className="space-y-1">
+          <h1 className="font-display text-3xl font-semibold tracking-tight">
+            Schedules
+          </h1>
+          <p className="text-sm text-muted-foreground">
+            Recurring payments that feed your inbox.
+          </p>
+        </div>
+
+        {isDesktop ? (
+          <Dialog open={open} onOpenChange={setOpen}>
+            <DialogTrigger asChild>{trigger}</DialogTrigger>
+            <DialogContent className="max-h-[90vh] overflow-y-auto">
+              <DialogHeader>
+                <DialogTitle>New schedule</DialogTitle>
+                <DialogDescription>
+                  Define a recurring payment. It'll surface in your inbox when
+                  due.
+                </DialogDescription>
+              </DialogHeader>
+              {form}
+            </DialogContent>
+          </Dialog>
+        ) : (
+          <Sheet open={open} onOpenChange={setOpen}>
+            <SheetTrigger asChild>{trigger}</SheetTrigger>
+            <SheetContent
+              side="bottom"
+              className="max-h-[92vh] overflow-y-auto p-6 pb-8"
             >
-              <span>
-                {s.name} · {String(s.amount)} {s.currency} · every{" "}
-                {s.interval_count} {s.interval_unit}
-              </span>
-              <button
-                className="text-sm text-red-600 hover:underline"
-                onClick={() => del.mutate(s.id)}
-              >
-                Delete
-              </button>
-            </li>
+              <SheetHeader className="mb-4 text-left">
+                <SheetTitle>New schedule</SheetTitle>
+                <SheetDescription>
+                  Define a recurring payment.
+                </SheetDescription>
+              </SheetHeader>
+              {form}
+            </SheetContent>
+          </Sheet>
+        )}
+      </header>
+
+      {schedules.isLoading ? (
+        <div className="space-y-3">
+          {[0, 1, 2].map((i) => (
+            <Skeleton key={i} className="h-20 w-full rounded-lg" />
           ))}
-        </ul>
+        </div>
+      ) : list.length === 0 ? (
+        <Card className="border-dashed bg-card/50">
+          <CardContent className="flex flex-col items-center gap-3 px-6 py-14 text-center">
+            <span className="grid h-14 w-14 place-items-center rounded-2xl bg-primary/10 text-primary">
+              <CalendarPlus className="h-7 w-7" />
+            </span>
+            <div className="space-y-1">
+              <p className="font-display text-lg font-semibold">
+                No schedules yet
+              </p>
+              <p className="text-sm text-muted-foreground">
+                Create your first recurring payment to get started.
+              </p>
+            </div>
+            <Button className="mt-1" onClick={() => setOpen(true)}>
+              <Plus className="h-4 w-4" />
+              New schedule
+            </Button>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="space-y-3">
+          {list.map((s, i) => (
+            <div
+              key={s.id}
+              className="animate-fade-up"
+              style={{ animationDelay: `${Math.min(i, 8) * 40}ms` }}
+            >
+              <ScheduleCard schedule={s} />
+            </div>
+          ))}
+        </div>
       )}
     </div>
   );
