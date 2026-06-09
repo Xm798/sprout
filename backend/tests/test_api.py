@@ -3,21 +3,19 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy.pool import StaticPool
-from sqlmodel import SQLModel, Session, create_engine
+from sqlalchemy.engine import make_url
+from sqlmodel import SQLModel, Session
 
 from app.main import app
 from app.db import get_session
 from app.config import AppConfig
+from tests.conftest import make_test_engine
 
 
 @pytest.fixture
 def client(tmp_path):
     demo = Path(__file__).parent / "fixtures" / "demo.bean"
-    engine = create_engine(
-        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
-    )
-    SQLModel.metadata.create_all(engine)
+    engine = make_test_engine()
     with Session(engine) as s:
         s.add(AppConfig(
             id=1, ledger_main_file=str(demo), ledger_root=str(tmp_path),
@@ -33,6 +31,8 @@ def client(tmp_path):
     app.dependency_overrides[get_session] = _override
     yield TestClient(app)
     app.dependency_overrides.clear()
+    if make_url(str(engine.url)).get_backend_name() != "sqlite":
+        SQLModel.metadata.drop_all(engine)
 
 
 def _new_schedule_payload():
