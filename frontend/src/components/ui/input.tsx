@@ -12,6 +12,12 @@ const Input = React.forwardRef<HTMLInputElement, React.ComponentProps<"input">>(
           className
         )}
         ref={ref}
+        // Sprout has no credential fields; suppress password-manager badges
+        // (1Password, LastPass, Bitwarden, Dashlane). Overridable via props.
+        data-1p-ignore
+        data-lpignore="true"
+        data-bwignore
+        data-form-type="other"
         {...props}
       />
     );
