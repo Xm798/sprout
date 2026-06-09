@@ -18,6 +18,21 @@ docker compose up --build
 ```
 The single image serves both the API and the web UI on port 8000. The SQLite DB persists in the `sprout-data` volume.
 
+### Postgres (optional)
+The default backend is SQLite — no action needed. To use Postgres instead, set
+`SPROUT_DATABASE_URL` (takes precedence over `SPROUT_DB_PATH`):
+```bash
+SPROUT_DATABASE_URL=postgresql+psycopg://USER:PASS@HOST:5432/DBNAME
+```
+With Docker Compose, layer the override file to bring up a bundled Postgres:
+```bash
+docker compose -f docker-compose.yml -f docker-compose.postgres.yml up --build
+```
+To run the test suite against Postgres, set `SPROUT_TEST_DATABASE_URL` before `pytest`:
+```bash
+SPROUT_TEST_DATABASE_URL=postgresql+psycopg://USER:PASS@HOST:5432/DBNAME pytest
+```
+
 ## Development
 Backend:
 ```bash
@@ -37,7 +52,7 @@ npm run build    # production build into dist/
 ```
 
 ## Configuration
-See `.env.example`. Key vars: `SPROUT_LEDGER_MAIN_FILE`, `SPROUT_LEDGER_ROOT`, `SPROUT_WRITE_MODE` (`single_file` | `month_file`), `SPROUT_DB_PATH`.
+See `.env.example`. Key vars: `SPROUT_LEDGER_MAIN_FILE`, `SPROUT_LEDGER_ROOT`, `SPROUT_WRITE_MODE` (`single_file` | `month_file`), `SPROUT_DB_PATH`, `SPROUT_DATABASE_URL` (Postgres; overrides `SPROUT_DB_PATH`).
 
 ## License
 MIT
