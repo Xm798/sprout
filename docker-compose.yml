@@ -1,0 +1,17 @@
+services:
+  sprout:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      SPROUT_LEDGER_MAIN_FILE: /ledger/main.bean
+      SPROUT_LEDGER_ROOT: /ledger
+      SPROUT_WRITE_MODE: single_file
+      SPROUT_SINGLE_FILE_NAME: sprout.bean
+      SPROUT_DB_PATH: /data/sprout.db
+    volumes:
+      - ./ledger:/ledger
+      - sprout-data:/data
+
+volumes:
+  sprout-data:
