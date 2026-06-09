@@ -17,6 +17,34 @@ jobs:
       - run: uv pip install -e ".[dev]"
       - run: uv run pytest -q
 
+  backend-postgres:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: sprout
+          POSTGRES_PASSWORD: sprout
+          POSTGRES_DB: sprout
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U sprout"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      SPROUT_TEST_DATABASE_URL: postgresql+psycopg://sprout:sprout@localhost:5432/sprout
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv venv
+      - run: uv pip install -e ".[dev]"
+      - run: uv run pytest -q
+
   frontend:
     runs-on: ubuntu-latest
     defaults:
