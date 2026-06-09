@@ -3,7 +3,6 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy.engine import make_url
 from sqlmodel import SQLModel, Session
 
 from app.main import app
@@ -31,7 +30,7 @@ def client(tmp_path):
     app.dependency_overrides[get_session] = _override
     yield TestClient(app)
     app.dependency_overrides.clear()
-    if make_url(str(engine.url)).get_backend_name() != "sqlite":
+    if engine.dialect.name != "sqlite":
         SQLModel.metadata.drop_all(engine)
 
 

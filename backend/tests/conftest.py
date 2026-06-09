@@ -3,7 +3,6 @@ import os
 from pathlib import Path
 
 import pytest
-from sqlalchemy.engine import make_url
 from sqlalchemy.pool import StaticPool
 from sqlmodel import SQLModel, Session, create_engine
 
@@ -30,7 +29,7 @@ def session():
     engine = make_test_engine()
     with Session(engine) as s:
         yield s
-    if make_url(str(engine.url)).get_backend_name() != "sqlite":
+    if engine.dialect.name != "sqlite":
         SQLModel.metadata.drop_all(engine)
 
 
