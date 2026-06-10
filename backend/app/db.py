@@ -92,7 +92,7 @@ def _migrate_occurrence(engine) -> None:
                     data[postings[0]["id"]] = _dec_str(r.override_amount)
                 else:
                     reason = "schedule not found" if sch is None else "schedule postings empty"
-                    raise RuntimeError(
+                    raise ValueError(
                         f"occurrence id={r.id}: override_amount={r.override_amount} cannot be migrated; "
                         f"{reason}. Remove the override or restore the schedule before upgrading."
                     )

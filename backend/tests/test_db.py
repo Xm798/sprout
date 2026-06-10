@@ -140,8 +140,8 @@ def test_migration_raises_on_orphaned_occurrence_with_override_amount():
 
     try:
         migrate_legacy_schema(engine)
-        assert False, "Expected RuntimeError to be raised"
-    except RuntimeError as e:
+        assert False, "Expected ValueError to be raised"
+    except ValueError as e:
         assert "99" in str(e), f"Error should mention occurrence id 99, got: {e}"
         assert "schedule" in str(e).lower(), f"Error should mention schedule, got: {e}"
 
