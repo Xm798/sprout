@@ -2,6 +2,7 @@ import type {
   AppConfig,
   ConfirmBody,
   Occurrence,
+  PreviewBody,
   Schedule,
   ScheduleCreate,
 } from "./types";
@@ -15,6 +16,18 @@ export class ApiError extends Error {
   }
 }
 
+// FastAPI HTTPException bodies are `{"detail": "..."}`; surface that human-readable
+// string instead of the raw JSON envelope. Falls back to the original text.
+function errorDetail(text: string): string {
+  try {
+    const data = JSON.parse(text);
+    if (typeof data?.detail === "string") return data.detail;
+  } catch {
+    // not JSON — use the raw text
+  }
+  return text;
+}
+
 async function http<T>(path: string, opts: RequestInit = {}): Promise<T> {
   const res = await fetch(BASE + path, {
     headers: { "Content-Type": "application/json", ...(opts.headers ?? {}) },
@@ -22,7 +35,7 @@ async function http<T>(path: string, opts: RequestInit = {}): Promise<T> {
   });
   if (!res.ok) {
     const text = await res.text().catch(() => res.statusText);
-    throw new ApiError(res.status, text || res.statusText);
+    throw new ApiError(res.status, errorDetail(text) || res.statusText);
   }
   if (res.status === 204) return undefined as T;
   return (await res.json()) as T;
@@ -37,6 +50,13 @@ export const api = {
 
   getInbox: () => http<Occurrence[]>("/inbox"),
   preview: (id: number) => http<{ text: string }>(`/inbox/${id}/preview`),
+  // POST preview renders with transient (unsaved) overrides so the inbox can
+  // reflect edited amounts live; an empty body falls back to stored state.
+  previewTransient: (id: number, body: PreviewBody) =>
+    http<{ text: string }>(`/inbox/${id}/preview`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
   confirm: (id: number, body: ConfirmBody) =>
     http<Occurrence>(`/inbox/${id}/confirm`, {
       method: "POST",

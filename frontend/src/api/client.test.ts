@@ -23,19 +23,37 @@ describe("api client", () => {
   it("POSTs createSchedule with a JSON body", async () => {
     const f = mockFetch({ id: 2 });
     await api.createSchedule({
-      name: "X", narration: "", amount: "1", currency: "USD",
-      from_account: "A", to_account: "B", interval_unit: "month",
-      interval_count: 1, anchor_date: "2026-01-01", end_date: null,
-      max_count: null, tags: "sprout", status: "active",
+      name: "X", narration: "",
+      postings: [
+        { id: "a", account: "B", amount: "1", currency: "USD" },
+        { id: "b", account: "A", amount: null, currency: null },
+      ],
+      interval_unit: "month", interval_count: 1, anchor_date: "2026-01-01",
+      end_date: null, max_count: null, tags: "sprout", status: "active",
     });
     const [url, opts] = f.mock.calls[0];
     expect(url).toBe("/api/schedules");
     expect(opts?.method).toBe("POST");
-    expect(JSON.parse(String(opts?.body)).name).toBe("X");
+    const body = JSON.parse(String(opts?.body));
+    expect(body.name).toBe("X");
+    expect(body.postings).toHaveLength(2);
   });
 
-  it("throws on a non-ok response", async () => {
-    mockFetch({ detail: "bad" }, false, 422);
-    await expect(api.confirm(1, {})).rejects.toThrow();
+  it("POSTs previewTransient with override_amounts", async () => {
+    const f = mockFetch({ text: "preview" });
+    await api.previewTransient(3, { override_amounts: { p1: "9.99" } });
+    const [url, opts] = f.mock.calls[0];
+    expect(url).toBe("/api/inbox/3/preview");
+    expect(opts?.method).toBe("POST");
+    expect(JSON.parse(String(opts?.body)).override_amounts).toEqual({
+      p1: "9.99",
+    });
+  });
+
+  it("surfaces the FastAPI detail string on an error response", async () => {
+    mockFetch({ detail: "amount 'abc' is not a number" }, false, 422);
+    await expect(api.confirm(1, {})).rejects.toThrow(
+      "amount 'abc' is not a number"
+    );
   });
 });

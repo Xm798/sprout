@@ -5,6 +5,10 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+export function errorMessage(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
+}
+
 export function formatAmount(amount: string | number, currency?: string) {
   const n = typeof amount === "number" ? amount : Number(amount);
   if (Number.isNaN(n)) return `${amount}${currency ? ` ${currency}` : ""}`;

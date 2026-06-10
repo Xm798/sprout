@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "./client";
-import type { AppConfig, ConfirmBody, ScheduleCreate } from "./types";
+import type { AppConfig, ConfirmBody, PreviewBody, ScheduleCreate } from "./types";
 
 export const qk = {
   schedules: ["schedules"] as const,
@@ -8,7 +8,7 @@ export const qk = {
   accounts: ["accounts"] as const,
   currencies: ["currencies"] as const,
   config: ["config"] as const,
-  preview: (id: number) => ["preview", id] as const,
+  preview: (id: number, body: PreviewBody) => ["preview", id, body] as const,
 };
 
 export function useSchedules() {
@@ -38,10 +38,10 @@ export function useInbox() {
   return useQuery({ queryKey: qk.inbox, queryFn: api.getInbox });
 }
 
-export function usePreview(id: number, enabled: boolean) {
+export function usePreview(id: number, body: PreviewBody, enabled: boolean) {
   return useQuery({
-    queryKey: qk.preview(id),
-    queryFn: () => api.preview(id),
+    queryKey: qk.preview(id, body),
+    queryFn: () => api.previewTransient(id, body),
     enabled,
   });
 }
