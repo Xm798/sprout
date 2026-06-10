@@ -1,8 +1,10 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
+import { Plus, Trash2 } from "lucide-react";
+import { toast } from "sonner";
 
 import { useAccounts, useCreateSchedule, useCurrencies } from "@/api/hooks";
-import type { IntervalUnit, ScheduleCreate } from "@/api/types";
+import type { IntervalUnit, Posting, ScheduleCreate } from "@/api/types";
 import { Button } from "@/components/ui/button";
 import { Combobox } from "@/components/ui/combobox";
 import { DatePicker } from "@/components/ui/date-picker";
@@ -15,27 +17,55 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { errorMessage } from "@/lib/utils";
 
-const EMPTY: ScheduleCreate = {
-  name: "",
-  narration: "",
-  amount: "",
-  currency: "USD",
-  from_account: "",
-  to_account: "",
-  interval_unit: "month",
-  interval_count: 1,
-  anchor_date: "",
-  end_date: null,
-  max_count: null,
-  tags: "sprout",
-  status: "active",
-};
+// Editing shape: amounts/currencies stay plain strings while typing; an empty
+// amount marks an auto-balance leg and is serialized to null on submit.
+interface DraftPosting {
+  id: string;
+  account: string;
+  amount: string;
+  currency: string;
+}
+
+type Draft = Omit<ScheduleCreate, "postings"> & { postings: DraftPosting[] };
+
+function newLeg(currency = "USD"): DraftPosting {
+  return { id: crypto.randomUUID(), account: "", amount: "", currency };
+}
+
+// Default: an amount leg + an auto-balance leg — the old "from X to Y" model.
+function emptyDraft(): Draft {
+  return {
+    name: "",
+    narration: "",
+    interval_unit: "month",
+    interval_count: 1,
+    anchor_date: "",
+    end_date: null,
+    max_count: null,
+    tags: "sprout",
+    status: "active",
+    postings: [newLeg("USD"), newLeg("")],
+  };
+}
+
+function toPayload(draft: Draft): ScheduleCreate {
+  const postings: Posting[] = draft.postings.map((p) => {
+    const amount = p.amount.trim();
+    const account = p.account.trim();
+    return amount === ""
+      ? { id: p.id, account, amount: null, currency: null }
+      : { id: p.id, account, amount, currency: p.currency };
+  });
+  const { postings: _drop, ...rest } = draft;
+  return { ...rest, postings };
+}
 
 const UNITS: IntervalUnit[] = ["day", "week", "month", "quarter", "year"];
 
 export function ScheduleForm({ onCreated }: { onCreated?: () => void }) {
-  const [form, setForm] = useState<ScheduleCreate>(EMPTY);
+  const [draft, setDraft] = useState<Draft>(emptyDraft);
   const accounts = useAccounts();
   const currencies = useCurrencies();
   const create = useCreateSchedule();
@@ -43,20 +73,40 @@ export function ScheduleForm({ onCreated }: { onCreated?: () => void }) {
   const accountOptions = accounts.data ?? [];
   const currencyOptions = currencies.data ?? [];
 
-  function set<K extends keyof ScheduleCreate>(
-    key: K,
-    value: ScheduleCreate[K]
-  ) {
-    setForm((f) => ({ ...f, [key]: value }));
+  function set<K extends keyof Draft>(key: K, value: Draft[K]) {
+    setDraft((d) => ({ ...d, [key]: value }));
+  }
+
+  function setLeg(id: string, patch: Partial<DraftPosting>) {
+    setDraft((d) => ({
+      ...d,
+      postings: d.postings.map((p) => (p.id === id ? { ...p, ...patch } : p)),
+    }));
+  }
+
+  function addLeg() {
+    setDraft((d) => ({ ...d, postings: [...d.postings, newLeg("USD")] }));
+  }
+
+  function removeLeg(id: string) {
+    setDraft((d) =>
+      d.postings.length <= 2
+        ? d
+        : { ...d, postings: d.postings.filter((p) => p.id !== id) }
+    );
   }
 
   function submit(e: FormEvent) {
     e.preventDefault();
-    create.mutate(form, {
+    create.mutate(toPayload(draft), {
       onSuccess: () => {
-        setForm(EMPTY);
+        setDraft(emptyDraft());
         onCreated?.();
       },
+      onError: (err) =>
+        toast.error("Couldn't create schedule", {
+          description: errorMessage(err),
+        }),
     });
   }
 
@@ -68,62 +118,80 @@ export function ScheduleForm({ onCreated }: { onCreated?: () => void }) {
           id="sf-name"
           required
           placeholder="e.g. Netflix"
-          value={form.name}
+          value={draft.name}
           onChange={(e) => set("name", e.target.value)}
         />
       </div>
 
-      <div className="grid grid-cols-3 gap-3">
-        <div className="col-span-2 space-y-1.5">
-          <Label htmlFor="sf-amount">Amount</Label>
-          <Input
-            id="sf-amount"
-            required
-            inputMode="decimal"
-            placeholder="0.00"
-            value={form.amount}
-            onChange={(e) => set("amount", e.target.value)}
-          />
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <Label>Postings</Label>
+          <Button type="button" variant="ghost" size="sm" onClick={addLeg}>
+            <Plus className="h-4 w-4" />
+            Add posting
+          </Button>
         </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="sf-currency">Currency</Label>
-          <Combobox
-            id="sf-currency"
-            aria-label="Currency"
-            value={form.currency}
-            onChange={(v) => set("currency", v)}
-            suggestions={currencyOptions}
-            transform={(v) => v.toUpperCase()}
-            placeholder="USD"
-          />
-        </div>
-      </div>
 
-      <div className="grid gap-3 sm:grid-cols-2">
-        <div className="space-y-1.5">
-          <Label htmlFor="sf-from">From account</Label>
-          <Combobox
-            id="sf-from"
-            aria-label="From account"
-            required
-            value={form.from_account}
-            onChange={(v) => set("from_account", v)}
-            suggestions={accountOptions}
-            placeholder="Assets:Bank"
-          />
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="sf-to">To account</Label>
-          <Combobox
-            id="sf-to"
-            aria-label="To account"
-            required
-            value={form.to_account}
-            onChange={(v) => set("to_account", v)}
-            suggestions={accountOptions}
-            placeholder="Expenses:Subscriptions"
-          />
-        </div>
+        {draft.postings.map((leg, i) => {
+          const blank = leg.amount.trim() === "";
+          return (
+            <div
+              key={leg.id}
+              className="space-y-1.5 rounded-lg border border-border/60 p-3"
+            >
+              <div className="flex items-center justify-between">
+                <Label htmlFor={`sf-account-${i}`} className="text-xs">
+                  Posting {i + 1}
+                  {blank && (
+                    <span className="ml-2 font-normal text-muted-foreground">
+                      auto-balance leg
+                    </span>
+                  )}
+                </Label>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                  aria-label={`Remove posting ${i + 1}`}
+                  disabled={draft.postings.length <= 2}
+                  onClick={() => removeLeg(leg.id)}
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </div>
+
+              <Combobox
+                id={`sf-account-${i}`}
+                aria-label={`Account ${i + 1}`}
+                required
+                value={leg.account}
+                onChange={(v) => setLeg(leg.id, { account: v })}
+                suggestions={accountOptions}
+                placeholder="Expenses:Subscriptions"
+              />
+
+              <div className="grid grid-cols-3 gap-2">
+                <Input
+                  className="col-span-2"
+                  aria-label={`Amount ${i + 1}`}
+                  inputMode="decimal"
+                  placeholder="Amount (blank = auto-balance)"
+                  value={leg.amount}
+                  onChange={(e) => setLeg(leg.id, { amount: e.target.value })}
+                />
+                <Combobox
+                  aria-label={`Currency ${i + 1}`}
+                  value={blank ? "" : leg.currency}
+                  onChange={(v) => setLeg(leg.id, { currency: v })}
+                  suggestions={currencyOptions}
+                  transform={(v) => v.toUpperCase()}
+                  placeholder="USD"
+                />
+              </div>
+            </div>
+          );
+        })}
       </div>
 
       <div className="space-y-1.5">
@@ -131,7 +199,7 @@ export function ScheduleForm({ onCreated }: { onCreated?: () => void }) {
         <Input
           id="sf-narration"
           placeholder="Optional memo"
-          value={form.narration}
+          value={draft.narration}
           onChange={(e) => set("narration", e.target.value)}
         />
       </div>
@@ -143,11 +211,11 @@ export function ScheduleForm({ onCreated }: { onCreated?: () => void }) {
             aria-label="Repeat count"
             type="number"
             min={1}
-            value={form.interval_count}
+            value={draft.interval_count}
             onChange={(e) => set("interval_count", Number(e.target.value))}
           />
           <Select
-            value={form.interval_unit}
+            value={draft.interval_unit}
             onValueChange={(v) => set("interval_unit", v as IntervalUnit)}
           >
             <SelectTrigger aria-label="Repeat interval">
@@ -169,7 +237,7 @@ export function ScheduleForm({ onCreated }: { onCreated?: () => void }) {
         <DatePicker
           id="sf-anchor"
           aria-label="Starting from"
-          value={form.anchor_date}
+          value={draft.anchor_date}
           onChange={(v) => set("anchor_date", v)}
         />
       </div>
@@ -177,9 +245,6 @@ export function ScheduleForm({ onCreated }: { onCreated?: () => void }) {
       <Button type="submit" disabled={create.isPending} className="w-full">
         {create.isPending ? "Saving…" : "Create schedule"}
       </Button>
-      {create.isError && (
-        <p className="text-sm text-destructive">{String(create.error)}</p>
-      )}
     </form>
   );
 }
