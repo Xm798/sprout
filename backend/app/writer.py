@@ -19,6 +19,34 @@ def target_path(config: AppConfig, when: datetime.date, target_file: str | None 
     return root / config.single_file_name
 
 
+def validate_target_file(config: AppConfig, value: str | None) -> str | None:
+    """Normalize and validate a schedule's target_file.
+
+    Returns the normalized relative path (POSIX separators) or None for
+    blank input. Raises ValueError on invalid paths. The containment check
+    resolves symlinks, so it is also re-run cheaply at confirm time to catch
+    symlinks created after the schedule was saved.
+    """
+    if value is None:
+        return None
+    value = value.strip()
+    if not value:
+        return None
+    if "\\" in value:
+        raise ValueError("target_file must use forward slashes")
+    p = Path(value)
+    if p.is_absolute():
+        raise ValueError("target_file must be a relative path")
+    if ".." in p.parts:
+        raise ValueError("target_file must not contain '..'")
+    if p.suffix != ".bean":
+        raise ValueError("target_file must end with .bean")
+    root = resolve_root(config).resolve()
+    if not (root / p).resolve().is_relative_to(root):
+        raise ValueError("target_file must stay inside the ledger root")
+    return p.as_posix()
+
+
 def append_transaction(path: Path, text: str) -> None:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)

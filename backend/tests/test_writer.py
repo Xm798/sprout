@@ -1,8 +1,10 @@
 import datetime
 from pathlib import Path
 
+import pytest
+
 from app.config import AppConfig
-from app.writer import target_path, append_transaction
+from app.writer import target_path, append_transaction, validate_target_file
 
 
 def _cfg(tmp_path, **kw):
@@ -61,3 +63,40 @@ def test_append_creates_and_appends(tmp_path):
     assert "ENTRY-A" in content
     assert content.index("ENTRY-A") < content.index("ENTRY-B")
     assert not list(p.parent.glob("*.tmp"))  # no leftover temp file
+
+
+def test_validate_target_file_accepts_nested(tmp_path):
+    cfg = _cfg(tmp_path)
+    assert validate_target_file(cfg, "loans/mortgage.bean") == "loans/mortgage.bean"
+
+
+def test_validate_target_file_normalizes_blank_to_none(tmp_path):
+    cfg = _cfg(tmp_path)
+    assert validate_target_file(cfg, None) is None
+    assert validate_target_file(cfg, "") is None
+    assert validate_target_file(cfg, "   ") is None
+
+
+@pytest.mark.parametrize("bad", [
+    "/abs/x.bean",        # absolute
+    "../up.bean",         # parent escape
+    "a/../../up.bean",    # nested parent escape
+    "rent.txt",           # wrong extension
+    "rent",               # no extension
+    "a\\b.bean",          # backslash
+])
+def test_validate_target_file_rejects(tmp_path, bad):
+    cfg = _cfg(tmp_path)
+    with pytest.raises(ValueError):
+        validate_target_file(cfg, bad)
+
+
+def test_validate_target_file_rejects_symlink_escape(tmp_path):
+    root = tmp_path / "ledger"
+    root.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (root / "link").symlink_to(outside, target_is_directory=True)
+    cfg = _cfg(tmp_path, ledger_root=str(root), ledger_main_file=str(root / "main.bean"))
+    with pytest.raises(ValueError):
+        validate_target_file(cfg, "link/x.bean")
