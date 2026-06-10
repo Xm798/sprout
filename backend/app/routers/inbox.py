@@ -13,7 +13,13 @@ router = APIRouter(prefix="/inbox")
 
 
 class ConfirmBody(BaseModel):
-    override_amount: str | None = None
+    override_amounts: dict[str, str] | None = None
+    override_date: datetime.date | None = None
+    override_narration: str | None = None
+
+
+class PreviewBody(BaseModel):
+    override_amounts: dict[str, str] | None = None
     override_date: datetime.date | None = None
     override_narration: str | None = None
 
@@ -42,14 +48,26 @@ def preview(occurrence_id: int, session: Session = Depends(get_session)) -> dict
         raise HTTPException(404, str(exc))
 
 
+@router.post("/{occurrence_id}/preview")
+def preview_transient(occurrence_id: int, body: PreviewBody, session: Session = Depends(get_session)) -> dict:
+    try:
+        return {"text": services.build_preview(
+            session, occurrence_id,
+            override_amounts=body.override_amounts,
+            override_date=body.override_date,
+            override_narration=body.override_narration,
+        )}
+    except LookupError as exc:
+        raise HTTPException(404, str(exc))
+
+
 @router.post("/{occurrence_id}/confirm", response_model=Occurrence)
 def confirm(occurrence_id: int, body: ConfirmBody, session: Session = Depends(get_session)) -> Occurrence:
-    from decimal import Decimal
     cfg = _config(session)
     try:
         return services.confirm_occurrence(
             session, cfg, occurrence_id,
-            override_amount=Decimal(body.override_amount) if body.override_amount else None,
+            override_amounts=body.override_amounts,
             override_date=body.override_date,
             override_narration=body.override_narration,
         )

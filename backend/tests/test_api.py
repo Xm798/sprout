@@ -34,13 +34,21 @@ def client(tmp_path):
         SQLModel.metadata.drop_all(engine)
 
 
-def _new_schedule_payload():
-    return {
-        "name": "Spotify", "narration": "sub", "amount": "15.00", "currency": "USD",
-        "from_account": "Assets:CreditCard", "to_account": "Expenses:Subscription",
+def _new_schedule_payload(**over):
+    body = {
+        "name": "Spotify", "narration": "sub",
+        "postings": [
+            {"id": "main", "account": "Expenses:Subscription", "amount": "15.00",
+             "currency": "USD", "cost": None, "price": None},
+            {"id": "bal", "account": "Assets:CreditCard", "amount": None,
+             "currency": None, "cost": None, "price": None},
+        ],
         "interval_unit": "month", "interval_count": 1,
         "anchor_date": "2026-01-15", "max_count": 6, "tags": "sprout",
+        "status": "active",
     }
+    body.update(over)
+    return body
 
 
 def test_create_and_list_schedules(client):
@@ -98,3 +106,46 @@ def test_confirm_missing_occurrence_404(client):
 
 def test_skip_missing_occurrence_404(client):
     assert client.post("/api/inbox/99999/skip").status_code == 404
+
+
+def test_create_schedule_returns_headline(client):
+    r = client.post("/api/schedules", json=_new_schedule_payload())
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert data["headline_amount"] == "15.00"
+    assert data["headline_currency"] == "USD"
+    assert data["postings"][0]["account"] == "Expenses:Subscription"
+
+
+def test_create_rejects_two_blank_legs(client):
+    bad = _new_schedule_payload(postings=[
+        {"id": "a", "account": "Assets:One", "amount": None, "currency": None,
+         "cost": None, "price": None},
+        {"id": "b", "account": "Assets:Two", "amount": None, "currency": None,
+         "cost": None, "price": None},
+    ])
+    assert client.post("/api/schedules", json=bad).status_code == 422
+
+
+def test_post_preview_reflects_transient_override(client):
+    client.post("/api/schedules", json=_new_schedule_payload())
+    occ = client.get("/api/inbox").json()[0]
+    r = client.post(
+        f"/api/inbox/{occ['id']}/preview",
+        json={"override_amounts": {"main": "7.50"}},
+    )
+    assert r.status_code == 200
+    assert "7.50 USD" in r.json()["text"]
+
+
+def test_update_schedule_returns_updated_headline(client):
+    sid = client.post("/api/schedules", json=_new_schedule_payload()).json()["id"]
+    updated = _new_schedule_payload()
+    updated["postings"][0]["amount"] = "42.00"
+    r = client.put(f"/api/schedules/{sid}", json=updated)
+    assert r.status_code == 200, r.text
+    assert r.json()["headline_amount"] == "42.00"
+
+
+def test_update_missing_schedule_404(client):
+    assert client.put("/api/schedules/99999", json=_new_schedule_payload()).status_code == 404
