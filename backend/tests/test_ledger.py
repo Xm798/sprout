@@ -1,5 +1,8 @@
+import os
+
 from app.ledger import load_accounts, load_currencies
 from app.ledger import validate_snippet
+from app.ledger import included_files
 
 
 def test_load_accounts(demo_ledger):
@@ -57,3 +60,26 @@ def test_unbalanced_snippet_is_reported(demo_ledger):
     )
     errors = validate_snippet(demo_ledger, snippet)
     assert errors
+
+
+def test_included_files_walks_globs_and_subfiles(tmp_path):
+    main = tmp_path / "main.bean"
+    main.write_text('include "sub.bean"\ninclude "txns/*.bean"\n')
+    (tmp_path / "sub.bean").write_text('include "nested.bean"\n')
+    (tmp_path / "nested.bean").write_text("")
+    (tmp_path / "txns").mkdir()
+    (tmp_path / "txns" / "a.bean").write_text("")
+
+    files = included_files(str(main))
+
+    assert os.path.realpath(str(main)) in files          # main itself is in the set
+    assert os.path.realpath(str(tmp_path / "sub.bean")) in files
+    assert os.path.realpath(str(tmp_path / "nested.bean")) in files
+    assert os.path.realpath(str(tmp_path / "txns" / "a.bean")) in files
+
+
+def test_included_files_tolerates_missing_include(tmp_path):
+    main = tmp_path / "main.bean"
+    main.write_text('include "ghost/*.bean"\n')
+    files = included_files(str(main))
+    assert os.path.realpath(str(main)) in files
