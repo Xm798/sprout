@@ -1,3 +1,4 @@
+from decimal import Decimal, InvalidOperation
 from typing import Optional
 
 from pydantic import BaseModel
@@ -24,6 +25,14 @@ class Posting(BaseModel):
     price: Optional[Price] = None
 
 
+def _is_decimal(s: str) -> bool:
+    try:
+        Decimal(s)
+        return True
+    except (InvalidOperation, TypeError, ValueError):
+        return False
+
+
 def parse_postings(raw: list[dict]) -> list[Posting]:
     return [Posting.model_validate(d) for d in (raw or [])]
 
@@ -45,6 +54,12 @@ def validate_postings(postings: list[Posting], *, require_blank_leg: bool = Fals
     for p in amount_legs:
         if not p.currency:
             errors.append(f"{p.account}: an amount requires a currency")
+        if p.amount is not None and not _is_decimal(p.amount):
+            errors.append(f"{p.account}: amount {p.amount!r} is not a number")
+        if p.cost is not None and not _is_decimal(p.cost.amount):
+            errors.append(f"{p.account}: cost amount {p.cost.amount!r} is not a number")
+        if p.price is not None and not _is_decimal(p.price.amount):
+            errors.append(f"{p.account}: price amount {p.price.amount!r} is not a number")
     for p in blank:
         if p.cost is not None or p.price is not None:
             errors.append(f"{p.account}: cost/price requires an amount")

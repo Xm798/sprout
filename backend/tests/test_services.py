@@ -186,6 +186,23 @@ def test_update_schedule_partial_clear_keeps_unrelated_override(session, config,
     assert occ.override_amounts == {"main": "9.99"}  # extra cleared, main kept
 
 
+def test_tags_with_spaces_render_cleanly(session, config, today):
+    sch = Schedule(
+        name="Spotify", narration="sub", postings=_postings(),
+        interval_unit="month", interval_count=1,
+        anchor_date=datetime.date(2026, 1, 15), max_count=6,
+        tags="a, b",
+    )
+    session.add(sch)
+    session.commit()
+    session.refresh(sch)
+    services.materialize_occurrences(session, config, today)
+    occ = _first_occ(session, sch)
+    text = services.build_preview(session, occ.id)
+    assert "#a #b" in text
+    assert "# b" not in text
+
+
 def test_update_schedule_clears_override_for_deleted_posting(session, config, today):
     from app.models import ScheduleCreate
     three = [

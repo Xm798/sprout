@@ -76,3 +76,16 @@ def test_struct_key_ignores_amount():
     assert struct_key(a) == struct_key(b)
     c = _amount_leg(account="Expenses:Other")
     assert struct_key(a) != struct_key(c)
+
+
+def test_validate_rejects_non_decimal_amount():
+    bad = _amount_leg(amount="abc")
+    blank = Posting(id="p2", account="Assets:Cash")
+    errors = validate_postings([bad, blank])
+    assert any("not a number" in e for e in errors)
+
+
+def test_validate_accepts_valid_decimal_amount():
+    good = _amount_leg(amount="42.50")
+    blank = Posting(id="p2", account="Assets:Cash")
+    assert validate_postings([good, blank]) == []

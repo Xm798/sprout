@@ -149,3 +149,20 @@ def test_update_schedule_returns_updated_headline(client):
 
 def test_update_missing_schedule_404(client):
     assert client.put("/api/schedules/99999", json=_new_schedule_payload()).status_code == 404
+
+
+def _inbox_occ_id(client) -> int:
+    client.post("/api/schedules", json=_new_schedule_payload())
+    return client.get("/api/inbox").json()[0]["id"]
+
+
+def test_confirm_malformed_amount_422(client):
+    occ_id = _inbox_occ_id(client)
+    r = client.post(f"/api/inbox/{occ_id}/confirm", json={"override_amounts": {"main": "abc"}})
+    assert r.status_code == 422
+
+
+def test_post_preview_malformed_amount_422(client):
+    occ_id = _inbox_occ_id(client)
+    r = client.post(f"/api/inbox/{occ_id}/preview", json={"override_amounts": {"main": "abc"}})
+    assert r.status_code == 422

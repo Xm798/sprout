@@ -59,6 +59,8 @@ def preview_transient(occurrence_id: int, body: PreviewBody, session: Session = 
         )}
     except LookupError as exc:
         raise HTTPException(404, str(exc))
+    except (ValueError, ArithmeticError) as exc:
+        raise HTTPException(422, str(exc))
 
 
 @router.post("/{occurrence_id}/confirm", response_model=Occurrence)
@@ -73,7 +75,7 @@ def confirm(occurrence_id: int, body: ConfirmBody, session: Session = Depends(ge
         )
     except LookupError as exc:
         raise HTTPException(404, str(exc))
-    except ValueError as exc:
+    except (ValueError, ArithmeticError) as exc:
         raise HTTPException(422, str(exc))
 
 
