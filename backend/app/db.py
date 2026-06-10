@@ -47,38 +47,55 @@ def _columns(engine, table: str) -> set[str]:
 
 
 def _migrate_schedule(engine) -> None:
-    with engine.begin() as conn:
-        conn.execute(text("ALTER TABLE schedule ADD COLUMN postings JSON"))
+    sched_cols = _columns(engine, "schedule")
+
+    # Validation pass: read all rows and compute updates before any DDL.
+    with engine.connect() as conn:
         rows = conn.execute(text(
             "SELECT id, amount, currency, from_account, to_account FROM schedule"
         )).all()
-        for r in rows:
-            if r.amount is None:
-                raise ValueError(
-                    f"schedule id={r.id}: NULL amount cannot be migrated; "
-                    "set a valid amount before upgrading."
-                )
-            postings = [
-                {"id": uuid.uuid4().hex, "account": r.to_account,
-                 "amount": _dec_str(r.amount), "currency": r.currency,
-                 "cost": None, "price": None},
-                {"id": uuid.uuid4().hex, "account": r.from_account,
-                 "amount": None, "currency": None, "cost": None, "price": None},
-            ]
+
+    updates: list[tuple[str, str]] = []  # (json_str, row_id)
+    for r in rows:
+        if r.amount is None:
+            raise ValueError(
+                f"schedule id={r.id}: NULL amount cannot be migrated; "
+                "set a valid amount before upgrading."
+            )
+        postings = [
+            {"id": uuid.uuid4().hex, "account": r.to_account,
+             "amount": _dec_str(r.amount), "currency": r.currency,
+             "cost": None, "price": None},
+            {"id": uuid.uuid4().hex, "account": r.from_account,
+             "amount": None, "currency": None, "cost": None, "price": None},
+        ]
+        updates.append((json.dumps(postings), r.id))
+
+    # All rows validated — now mutate the schema.
+    with engine.begin() as conn:
+        if "postings" not in sched_cols:
+            conn.execute(text("ALTER TABLE schedule ADD COLUMN postings JSON"))
+        for p, row_id in updates:
             conn.execute(
                 text("UPDATE schedule SET postings = :p WHERE id = :id"),
-                {"p": json.dumps(postings), "id": r.id},
+                {"p": p, "id": row_id},
             )
         for col in ("amount", "currency", "from_account", "to_account"):
-            conn.execute(text(f"ALTER TABLE schedule DROP COLUMN {col}"))
+            if col in sched_cols:
+                conn.execute(text(f"ALTER TABLE schedule DROP COLUMN {col}"))
 
 
 def _migrate_occurrence(engine) -> None:
-    with engine.begin() as conn:
-        conn.execute(text("ALTER TABLE occurrence ADD COLUMN override_amounts JSON"))
+    occ_cols = _columns(engine, "occurrence")
+
+    # Validation pass: read all rows with non-NULL override_amount and resolve
+    # each to the first posting id before any DDL.
+    with engine.connect() as conn:
         rows = conn.execute(text(
             "SELECT id, schedule_id, override_amount FROM occurrence"
         )).all()
+
+        updates: list[tuple[str, str]] = []  # (json_str, occ_id)
         for r in rows:
             data: dict[str, str] = {}
             if r.override_amount is not None:
@@ -87,31 +104,61 @@ def _migrate_occurrence(engine) -> None:
                     {"sid": r.schedule_id},
                 ).first()
                 raw = sch.postings if sch else None
-                postings = json.loads(raw) if isinstance(raw, str) else (raw or [])
-                if postings:
-                    data[postings[0]["id"]] = _dec_str(r.override_amount)
-                else:
+                if raw is None:
                     reason = "schedule not found" if sch is None else "schedule postings empty"
                     raise ValueError(
                         f"occurrence id={r.id}: override_amount={r.override_amount} cannot be migrated; "
                         f"{reason}. Remove the override or restore the schedule before upgrading."
                     )
+                try:
+                    postings = json.loads(raw) if isinstance(raw, str) else raw
+                except json.JSONDecodeError as exc:
+                    raise ValueError(
+                        f"occurrence id={r.id}, schedule id={r.schedule_id}: "
+                        f"postings column contains malformed JSON — {exc}. "
+                        "Fix the schedule before upgrading."
+                    ) from exc
+                if not postings:
+                    raise ValueError(
+                        f"occurrence id={r.id}: override_amount={r.override_amount} cannot be migrated; "
+                        "schedule postings empty. Remove the override or restore the schedule before upgrading."
+                    )
+                try:
+                    first_id = postings[0]["id"]
+                except (KeyError, TypeError) as exc:
+                    raise ValueError(
+                        f"occurrence id={r.id}, schedule id={r.schedule_id}: "
+                        f"first posting is missing an 'id' field — {exc}. "
+                        "Fix the schedule before upgrading."
+                    ) from exc
+                data[first_id] = _dec_str(r.override_amount)
+            updates.append((json.dumps(data), r.id))
+
+    # All rows validated — now mutate the schema.
+    with engine.begin() as conn:
+        if "override_amounts" not in occ_cols:
+            conn.execute(text("ALTER TABLE occurrence ADD COLUMN override_amounts JSON"))
+        for d, occ_id in updates:
             conn.execute(
                 text("UPDATE occurrence SET override_amounts = :d WHERE id = :id"),
-                {"d": json.dumps(data), "id": r.id},
+                {"d": d, "id": occ_id},
             )
-        conn.execute(text("ALTER TABLE occurrence DROP COLUMN override_amount"))
+        if "override_amount" in occ_cols:
+            conn.execute(text("ALTER TABLE occurrence DROP COLUMN override_amount"))
 
 
 def migrate_legacy_schema(engine) -> None:
     """Idempotently upgrade a pre-multi-posting database. No-op on fresh or
     already-migrated databases. Schedule is migrated before occurrence because
-    the occurrence backfill reads the schedule's new posting ids."""
+    the occurrence backfill reads the schedule's new posting ids.
+
+    Guard condition is OLD column presence, not absence of new column, so a
+    half-migrated DB (new column added but old not yet dropped) resumes cleanly."""
     sched_cols = _columns(engine, "schedule")
-    if sched_cols and "postings" not in sched_cols and "from_account" in sched_cols:
+    if sched_cols and "from_account" in sched_cols:
         _migrate_schedule(engine)
     occ_cols = _columns(engine, "occurrence")
-    if occ_cols and "override_amounts" not in occ_cols and "override_amount" in occ_cols:
+    if occ_cols and "override_amount" in occ_cols:
         _migrate_occurrence(engine)
 
 
