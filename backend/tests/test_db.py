@@ -112,3 +112,70 @@ def test_migration_noop_on_fresh_schema():
     migrate_legacy_schema(engine)  # fresh new-schema DB: must be a no-op, no raise
     cols = {c["name"] for c in inspect(engine).get_columns("schedule")}
     assert "postings" in cols and "from_account" not in cols
+
+
+def test_migration_raises_on_orphaned_occurrence_with_override_amount():
+    """Occurrence with non-NULL override_amount but missing schedule row should raise."""
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
+    with engine.begin() as conn:
+        conn.execute(text(
+            "CREATE TABLE schedule ("
+            "id INTEGER PRIMARY KEY, name TEXT, narration TEXT,"
+            "amount NUMERIC, currency TEXT, from_account TEXT, to_account TEXT,"
+            "interval_unit TEXT, interval_count INTEGER, anchor_date DATE,"
+            "end_date DATE, max_count INTEGER, tags TEXT, status TEXT,"
+            "created_at DATETIME, updated_at DATETIME)"
+        ))
+        conn.execute(text(
+            "CREATE TABLE occurrence ("
+            "id INTEGER PRIMARY KEY, schedule_id INTEGER, due_date DATE, status TEXT,"
+            "override_amount NUMERIC, override_date DATE, override_narration TEXT,"
+            "written_path TEXT, sprout_id TEXT, confirmed_at DATETIME)"
+        ))
+        # Insert occurrence with override_amount but orphaned (no schedule row)
+        conn.execute(text(
+            "INSERT INTO occurrence (id, schedule_id, due_date, status, override_amount)"
+            " VALUES (99, 999, '2026-06-15', 'pending', 123.45)"
+        ))
+
+    try:
+        migrate_legacy_schema(engine)
+        assert False, "Expected RuntimeError to be raised"
+    except RuntimeError as e:
+        assert "99" in str(e), f"Error should mention occurrence id 99, got: {e}"
+        assert "schedule" in str(e).lower(), f"Error should mention schedule, got: {e}"
+
+
+def test_migration_succeeds_on_orphaned_occurrence_with_null_override():
+    """Occurrence with NULL override_amount but missing schedule row should migrate fine."""
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
+    with engine.begin() as conn:
+        conn.execute(text(
+            "CREATE TABLE schedule ("
+            "id INTEGER PRIMARY KEY, name TEXT, narration TEXT,"
+            "amount NUMERIC, currency TEXT, from_account TEXT, to_account TEXT,"
+            "interval_unit TEXT, interval_count INTEGER, anchor_date DATE,"
+            "end_date DATE, max_count INTEGER, tags TEXT, status TEXT,"
+            "created_at DATETIME, updated_at DATETIME)"
+        ))
+        conn.execute(text(
+            "CREATE TABLE occurrence ("
+            "id INTEGER PRIMARY KEY, schedule_id INTEGER, due_date DATE, status TEXT,"
+            "override_amount NUMERIC, override_date DATE, override_narration TEXT,"
+            "written_path TEXT, sprout_id TEXT, confirmed_at DATETIME)"
+        ))
+        # Insert occurrence with NULL override_amount and orphaned schedule
+        conn.execute(text(
+            "INSERT INTO occurrence (id, schedule_id, due_date, status, override_amount)"
+            " VALUES (99, 999, '2026-06-15', 'pending', NULL)"
+        ))
+
+    migrate_legacy_schema(engine)  # Must not raise
+
+    ocols = {c["name"] for c in inspect(engine).get_columns("occurrence")}
+    assert "override_amounts" in ocols and "override_amount" not in ocols
+
+    with engine.begin() as conn:
+        occ = conn.execute(text("SELECT override_amounts FROM occurrence WHERE id=99")).first()
+    overrides = json.loads(occ.override_amounts) if isinstance(occ.override_amounts, str) else occ.override_amounts
+    assert overrides == {}  # NULL override_amount migrates to empty dict

@@ -90,6 +90,12 @@ def _migrate_occurrence(engine) -> None:
                 postings = json.loads(raw) if isinstance(raw, str) else (raw or [])
                 if postings:
                     data[postings[0]["id"]] = _dec_str(r.override_amount)
+                else:
+                    reason = "schedule not found" if sch is None else "schedule postings empty"
+                    raise RuntimeError(
+                        f"occurrence id={r.id}: override_amount={r.override_amount} cannot be migrated; "
+                        f"{reason}. Remove the override or restore the schedule before upgrading."
+                    )
             conn.execute(
                 text("UPDATE occurrence SET override_amounts = :d WHERE id = :id"),
                 {"d": json.dumps(data), "id": r.id},
