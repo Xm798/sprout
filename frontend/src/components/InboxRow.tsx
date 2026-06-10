@@ -3,7 +3,7 @@ import { ArrowRight, Check, ChevronDown, SkipForward } from "lucide-react";
 import { toast } from "sonner";
 
 import { useConfirm, usePreview, useSkip } from "@/api/hooks";
-import type { Occurrence, Schedule } from "@/api/types";
+import type { ConfirmBody, Occurrence, Schedule } from "@/api/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -11,7 +11,7 @@ import { DatePicker } from "@/components/ui/date-picker";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
-import { cn, formatAmount } from "@/lib/utils";
+import { cn, errorMessage, formatAmount } from "@/lib/utils";
 
 function formatDate(value: string) {
   const d = new Date(`${value}T00:00:00`);
@@ -43,28 +43,40 @@ export function InboxRow({
 
   const confirm = useConfirm();
   const skip = useSkip();
-  const preview = usePreview(occurrence.id, expanded);
 
   const name = schedule?.name ?? `Schedule ${occurrence.schedule_id}`;
-  const baseAmount = occurrence.override_amount ?? schedule?.amount ?? "";
+  // Headline = first amount-bearing leg; edits in this row tune that leg.
+  const amountLeg = schedule?.postings.find((p) => p.amount != null);
+  const blankLeg = schedule?.postings.find((p) => p.amount == null);
+  const headlineId = amountLeg?.id;
+  const storedOverride =
+    headlineId != null ? occurrence.override_amounts[headlineId] : undefined;
+  const baseAmount = storedOverride ?? schedule?.headline_amount ?? "";
   const effectiveDate = occurrence.override_date ?? occurrence.due_date;
   const fieldId = `occ-${occurrence.id}`;
 
+  // Collect the row's edits into a request body; omit untouched fields so the
+  // backend keeps any persisted overrides.
+  function buildBody(): ConfirmBody {
+    const body: ConfirmBody = {};
+    if (amount && headlineId != null) {
+      body.override_amounts = { [headlineId]: amount };
+    }
+    if (date) body.override_date = date;
+    if (narration) body.override_narration = narration;
+    return body;
+  }
+
+  const preview = usePreview(occurrence.id, buildBody(), expanded);
+
   function onConfirm() {
     confirm.mutate(
-      {
-        id: occurrence.id,
-        body: {
-          override_amount: amount || null,
-          override_date: date || null,
-          override_narration: narration || null,
-        },
-      },
+      { id: occurrence.id, body: buildBody() },
       {
         onSuccess: () => toast.success(`Confirmed ${name}`),
         onError: (e) =>
           toast.error(`Couldn't confirm ${name}`, {
-            description: String(e),
+            description: errorMessage(e),
           }),
       }
     );
@@ -89,9 +101,9 @@ export function InboxRow({
             </Badge>
           </div>
           <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
-            <span>{leaf(schedule?.from_account)}</span>
+            <span>{leaf(amountLeg?.account)}</span>
             <ArrowRight className="h-3.5 w-3.5 shrink-0 opacity-70" />
-            <span>{leaf(schedule?.to_account)}</span>
+            <span>{leaf(blankLeg?.account)}</span>
           </div>
           <p className="text-xs text-muted-foreground">
             Due {formatDate(effectiveDate)}
@@ -100,7 +112,7 @@ export function InboxRow({
 
         <div className="text-right">
           <div className="font-mono text-lg font-semibold tabular-nums">
-            {formatAmount(baseAmount, schedule?.currency)}
+            {formatAmount(baseAmount, schedule?.headline_currency ?? undefined)}
           </div>
         </div>
       </div>
@@ -148,10 +160,13 @@ export function InboxRow({
         <div className="space-y-4 border-t border-border/60 bg-muted/30 p-4 sm:p-5">
           <div className="grid gap-3 sm:grid-cols-3">
             <div className="space-y-1.5">
-              <Label htmlFor={`${fieldId}-amount`}>Amount</Label>
+              <Label htmlFor={`${fieldId}-amount`}>
+                Amount{amountLeg ? ` · ${leaf(amountLeg.account)}` : ""}
+              </Label>
               <Input
                 id={`${fieldId}-amount`}
                 inputMode="decimal"
+                disabled={headlineId == null}
                 placeholder={String(baseAmount)}
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}

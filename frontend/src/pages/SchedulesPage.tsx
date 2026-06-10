@@ -35,6 +35,18 @@ function intervalLabel(s: Schedule) {
     : `Every ${s.interval_count} ${unit}`;
 }
 
+// "Expenses:Sub → Assets:Bank": the headline (first amount-bearing) leg flowing
+// into the auto-balance leg. Falls back to listing accounts when no blank leg.
+function postingsSummary(s: Schedule): string {
+  const amountLeg = s.postings.find((p) => p.amount != null);
+  const blankLeg = s.postings.find((p) => p.amount == null);
+  if (amountLeg && blankLeg) return `${amountLeg.account} → ${blankLeg.account}`;
+  return s.postings
+    .map((p) => p.account)
+    .filter(Boolean)
+    .join(" · ");
+}
+
 function ScheduleCard({ schedule }: { schedule: Schedule }) {
   const del = useDeleteSchedule();
   return (
@@ -51,14 +63,19 @@ function ScheduleCard({ schedule }: { schedule: Schedule }) {
             <div className="flex flex-wrap items-center gap-1.5">
               <Badge variant="outline">{intervalLabel(schedule)}</Badge>
               <span className="truncate text-xs text-muted-foreground">
-                {schedule.from_account} → {schedule.to_account}
+                {postingsSummary(schedule)}
               </span>
             </div>
           </div>
         </div>
         <div className="flex shrink-0 flex-col items-end gap-1.5">
           <span className="font-mono text-sm font-semibold tabular-nums">
-            {formatAmount(schedule.amount, schedule.currency)}
+            {schedule.headline_amount != null
+              ? formatAmount(
+                  schedule.headline_amount,
+                  schedule.headline_currency ?? undefined
+                )
+              : "—"}
           </span>
           <Button
             variant="ghost"

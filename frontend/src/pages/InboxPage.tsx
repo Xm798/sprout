@@ -17,12 +17,15 @@ export function InboxPage() {
   const byId = new Map((schedules.data ?? []).map((s) => [s.id, s]));
   const items = inbox.data ?? [];
 
-  // Sum the amount due per currency, using overrides where present.
+  // Sum the headline amount due per currency, using per-leg overrides where present.
   const totals = new Map<string, number>();
   for (const occ of items) {
     const sch = byId.get(occ.schedule_id);
-    const raw = occ.override_amount ?? sch?.amount;
-    const currency = sch?.currency ?? "";
+    const headlineLeg = sch?.postings.find((p) => p.amount != null);
+    const raw =
+      (headlineLeg && occ.override_amounts[headlineLeg.id]) ??
+      sch?.headline_amount;
+    const currency = sch?.headline_currency ?? "";
     const n = Number(raw);
     if (!Number.isNaN(n)) totals.set(currency, (totals.get(currency) ?? 0) + n);
   }
