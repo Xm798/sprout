@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 
 from app.config import AppConfig
+from app.ledger import included_files
 
 
 def resolve_root(config: AppConfig) -> Path:
@@ -57,3 +58,22 @@ def append_transaction(path: Path, text: str) -> None:
     tmp = path.with_name(path.name + ".tmp")
     tmp.write_text(new_content)
     os.replace(tmp, path)
+
+
+def ensure_included(config: AppConfig, target: Path) -> None:
+    """Make `target` loadable from the main ledger.
+
+    Creates the file when missing (an include whose glob matches no file is
+    a beancount error, so creation must precede the reachability check),
+    then appends an include line to the main file unless the target is
+    already reachable — directly, via a sub-file, or via a glob include.
+    """
+    target = Path(target)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if not target.exists():
+        target.touch()
+    main = Path(config.ledger_main_file).resolve()
+    if os.path.realpath(target) in included_files(str(main)):
+        return
+    rel = Path(os.path.relpath(target.resolve(), main.parent)).as_posix()
+    append_transaction(main, f'include "{rel}"\n')
