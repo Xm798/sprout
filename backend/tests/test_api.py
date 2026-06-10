@@ -194,3 +194,34 @@ def test_post_preview_unknown_override_key_422(client):
     r = client.post(f"/api/inbox/{occ_id}/preview", json={"override_amounts": {"bogus": "99.00"}})
     assert r.status_code == 422
     assert "bogus" in r.json()["detail"]
+
+
+def _set_stored_override(occ_id: int, overrides: dict) -> None:
+    """Write occ.override_amounts directly via the session, bypassing the API
+    (which now rejects unknown keys) to simulate legacy/stale persisted data."""
+    from app.models import Occurrence
+    session = next(app.dependency_overrides[get_session]())
+    occ = session.get(Occurrence, occ_id)
+    occ.override_amounts = overrides
+    session.add(occ)
+    session.commit()
+
+
+def test_get_preview_stale_stored_override_key_422(client):
+    """A stale key in the STORED occ.override_amounts (persisted before validation
+    existed, or orphaned by a schedule edit) must 422 on GET preview, not no-op."""
+    occ_id = _inbox_occ_id(client)
+    _set_stored_override(occ_id, {"stale": "99.00"})
+    r = client.get(f"/api/inbox/{occ_id}/preview")
+    assert r.status_code == 422
+    assert "stale" in r.json()["detail"]
+
+
+def test_post_preview_stale_stored_override_key_422(client):
+    """POST preview must also reject stale STORED override keys, even when the
+    transient body is clean."""
+    occ_id = _inbox_occ_id(client)
+    _set_stored_override(occ_id, {"stale": "99.00"})
+    r = client.post(f"/api/inbox/{occ_id}/preview", json={"override_amounts": {"main": "7.50"}})
+    assert r.status_code == 422
+    assert "stale" in r.json()["detail"]

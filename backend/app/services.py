@@ -89,10 +89,13 @@ def build_preview(session: Session, occurrence_id: int, **transient) -> str:
     if occ is None:
         raise LookupError(f"occurrence {occurrence_id} not found")
     sch = session.get(Schedule, occ.schedule_id)
-    override_amounts = transient.get("override_amounts")
     postings = parse_postings(sch.postings)
-    errors = validate_overrides(postings, override_amounts)
-    effective = _effective_postings(occ, sch, override_amounts)
+    # Validate the MERGED overrides (stored + transient), mirroring confirm:
+    # stale stored keys must error too, not just incoming ones.
+    merged = dict(occ.override_amounts or {})
+    merged.update(transient.get("override_amounts") or {})
+    errors = validate_overrides(postings, merged)
+    effective = _apply_overrides(postings, merged)
     errors += validate_postings(effective)
     if errors:
         raise ValueError("; ".join(errors))

@@ -299,6 +299,22 @@ def test_preview_unknown_override_key_raises(session, config, today):
         services.build_preview(session, occ.id, override_amounts={"bogus": "99.00"})
 
 
+def test_preview_stale_stored_override_key_raises(session, config, today):
+    """build_preview must validate the STORED occ.override_amounts too — a stale
+    key (legacy data or orphaned by a schedule edit) must raise, even with no
+    transient overrides passed (GET preview path)."""
+    import pytest
+    sch = _make_schedule(session)
+    services.materialize_occurrences(session, config, today)
+    occ = _first_occ(session, sch)
+    occ.override_amounts = {"stale": "99.00"}
+    session.add(occ)
+    session.commit()
+
+    with pytest.raises(ValueError, match="stale"):
+        services.build_preview(session, occ.id)
+
+
 def test_preview_malformed_amount_friendly_message(session, config, today):
     """build_preview with a non-numeric amount must raise ValueError with the friendly message."""
     import pytest

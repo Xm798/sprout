@@ -46,6 +46,8 @@ def preview(occurrence_id: int, session: Session = Depends(get_session)) -> dict
         return {"text": services.build_preview(session, occurrence_id)}
     except LookupError as exc:
         raise HTTPException(404, str(exc))
+    except (ValueError, ArithmeticError) as exc:
+        raise HTTPException(422, str(exc))
 
 
 @router.post("/{occurrence_id}/preview")
