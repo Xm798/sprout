@@ -253,3 +253,58 @@ def test_update_schedule_clears_override_for_deleted_posting(session, config, to
     services.update_schedule(session, sch.id, payload)
     session.refresh(occ)
     assert occ.override_amounts == {"main": "9.99"}  # deleted posting's override cleared
+
+
+# ── override-key validation ────────────────────────────────────────────────────
+
+def test_confirm_unknown_override_key_raises_422(session, config, today):
+    """Unknown posting id in override_amounts must raise ValueError, leave occ pending,
+    leave the ledger file unwritten, and NOT persist the bogus key."""
+    import pytest
+    from pathlib import Path
+    sch = _make_schedule(session)
+    services.materialize_occurrences(session, config, today)
+    occ = _first_occ(session, sch)
+
+    with pytest.raises(ValueError, match="bogus"):
+        services.confirm_occurrence(session, config, occ.id, override_amounts={"bogus": "99.00"})
+
+    session.refresh(occ)
+    assert occ.status == "pending"
+    ledger = Path(config.ledger_root, "sprout.bean")
+    assert not ledger.exists()
+    assert "bogus" not in (occ.override_amounts or {})
+
+
+def test_confirm_malformed_amount_friendly_message(session, config, today):
+    """confirm with a non-numeric amount must raise ValueError with the friendly
+    'is not a number' message (not a raw decimal exception)."""
+    import pytest
+    sch = _make_schedule(session)
+    services.materialize_occurrences(session, config, today)
+    occ = _first_occ(session, sch)
+
+    with pytest.raises(ValueError, match="is not a number"):
+        services.confirm_occurrence(session, config, occ.id, override_amounts={"main": "abc"})
+
+
+def test_preview_unknown_override_key_raises(session, config, today):
+    """build_preview with an unknown posting id in override_amounts must raise ValueError."""
+    import pytest
+    sch = _make_schedule(session)
+    services.materialize_occurrences(session, config, today)
+    occ = _first_occ(session, sch)
+
+    with pytest.raises(ValueError, match="bogus"):
+        services.build_preview(session, occ.id, override_amounts={"bogus": "99.00"})
+
+
+def test_preview_malformed_amount_friendly_message(session, config, today):
+    """build_preview with a non-numeric amount must raise ValueError with the friendly message."""
+    import pytest
+    sch = _make_schedule(session)
+    services.materialize_occurrences(session, config, today)
+    occ = _first_occ(session, sch)
+
+    with pytest.raises(ValueError, match="is not a number"):
+        services.build_preview(session, occ.id, override_amounts={"main": "abc"})

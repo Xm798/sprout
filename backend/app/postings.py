@@ -72,6 +72,18 @@ def validate_postings(postings: list[Posting], *, require_blank_leg: bool = Fals
     return errors
 
 
+def validate_overrides(postings: list[Posting], overrides: dict) -> list[str]:
+    """Return error strings for any override key that has no matching posting id."""
+    if not overrides:
+        return []
+    valid_ids = {p.id for p in postings}
+    return [
+        f"unknown posting id {pid!r} in override_amounts"
+        for pid in overrides
+        if pid not in valid_ids
+    ]
+
+
 def headline(postings: list[Posting]) -> tuple[Optional[str], Optional[str]]:
     for p in postings:
         if p.amount is not None:

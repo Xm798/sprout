@@ -7,7 +7,7 @@ from app.config import AppConfig
 from app.models import Schedule, Occurrence, ScheduleCreate
 from app.due_engine import compute_due_dates
 from app.bean_format import format_transaction
-from app.postings import Posting, parse_postings, validate_postings, struct_key
+from app.postings import Posting, parse_postings, validate_postings, validate_overrides, struct_key
 from app.ledger import validate_snippet
 from app.writer import target_path, append_transaction
 
@@ -89,6 +89,13 @@ def build_preview(session: Session, occurrence_id: int, **transient) -> str:
     if occ is None:
         raise LookupError(f"occurrence {occurrence_id} not found")
     sch = session.get(Schedule, occ.schedule_id)
+    override_amounts = transient.get("override_amounts")
+    postings = parse_postings(sch.postings)
+    errors = validate_overrides(postings, override_amounts)
+    effective = _effective_postings(occ, sch, override_amounts)
+    errors += validate_postings(effective)
+    if errors:
+        raise ValueError("; ".join(errors))
     return render_occurrence(occ, sch, **transient)
 
 
@@ -105,20 +112,30 @@ def confirm_occurrence(
         return occ
     sch = session.get(Schedule, occ.schedule_id)
 
+    # Validate before mutating — compute effective postings from the incoming
+    # overrides merged over any stored ones, then check structural errors and
+    # unknown keys.  Raise immediately so nothing is written or persisted.
+    postings = parse_postings(sch.postings)
+    merged_amounts = dict(occ.override_amounts or {})
     if override_amounts:
-        merged = dict(occ.override_amounts or {})
-        merged.update(override_amounts)
-        occ.override_amounts = merged
+        merged_amounts.update(override_amounts)
+    errors = validate_overrides(postings, merged_amounts)
+    effective = _apply_overrides(postings, merged_amounts)
+    errors += validate_postings(effective)
+    if errors:
+        raise ValueError("; ".join(errors))
+
+    if override_amounts:
+        occ.override_amounts = merged_amounts
     if override_date is not None:
         occ.override_date = override_date
     if override_narration is not None:
         occ.override_narration = override_narration
 
-    errors = validate_postings(_effective_postings(occ, sch))
     text = render_occurrence(occ, sch)
-    errors += validate_snippet(config.ledger_main_file, text)
-    if errors:
-        raise ValueError("; ".join(errors))
+    snippet_errors = validate_snippet(config.ledger_main_file, text)
+    if snippet_errors:
+        raise ValueError("; ".join(snippet_errors))
 
     eff_date, _narration = _effective_meta(occ, sch)
     path = target_path(config, eff_date)

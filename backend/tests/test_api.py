@@ -160,9 +160,37 @@ def test_confirm_malformed_amount_422(client):
     occ_id = _inbox_occ_id(client)
     r = client.post(f"/api/inbox/{occ_id}/confirm", json={"override_amounts": {"main": "abc"}})
     assert r.status_code == 422
+    assert "is not a number" in r.json()["detail"]
 
 
 def test_post_preview_malformed_amount_422(client):
     occ_id = _inbox_occ_id(client)
     r = client.post(f"/api/inbox/{occ_id}/preview", json={"override_amounts": {"main": "abc"}})
     assert r.status_code == 422
+    assert "is not a number" in r.json()["detail"]
+
+
+def test_confirm_unknown_override_key_422(client):
+    """Unknown posting id in override_amounts must 422, keep occ pending, not persist bogus key."""
+    client.post("/api/schedules", json=_new_schedule_payload())
+    occ = client.get("/api/inbox").json()[0]
+    occ_id = occ["id"]
+    r = client.post(f"/api/inbox/{occ_id}/confirm", json={"override_amounts": {"bogus": "99.00"}})
+    assert r.status_code == 422
+    assert "bogus" in r.json()["detail"]
+
+    # Occurrence must still be pending
+    inbox = client.get("/api/inbox").json()
+    assert any(o["id"] == occ_id and o["status"] == "pending" for o in inbox)
+
+    # override_amounts must not contain the bogus key
+    override_amounts = next(o["override_amounts"] for o in inbox if o["id"] == occ_id)
+    assert override_amounts is None or "bogus" not in (override_amounts or {})
+
+
+def test_post_preview_unknown_override_key_422(client):
+    """Unknown posting id in preview override_amounts must 422."""
+    occ_id = _inbox_occ_id(client)
+    r = client.post(f"/api/inbox/{occ_id}/preview", json={"override_amounts": {"bogus": "99.00"}})
+    assert r.status_code == 422
+    assert "bogus" in r.json()["detail"]
