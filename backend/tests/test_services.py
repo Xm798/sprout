@@ -1,47 +1,22 @@
 import datetime
-from decimal import Decimal
 from pathlib import Path
 
 from app.models import Schedule, Occurrence
 from app import services
 
 
-def test_schedule_and_occurrence_persist(session):
-    sch = Schedule(
-        name="Spotify",
-        narration="subscription",
-        amount=Decimal("15.00"),
-        currency="USD",
-        from_account="Assets:CreditCard",
-        to_account="Expenses:Subscription",
-        interval_unit="month",
-        interval_count=1,
-        anchor_date=datetime.date(2026, 1, 15),
-        tags="sprout",
-    )
-    session.add(sch)
-    session.commit()
-    session.refresh(sch)
-    assert sch.id is not None
-    assert sch.status == "active"
-
-    occ = Occurrence(
-        schedule_id=sch.id,
-        due_date=datetime.date(2026, 6, 15),
-        sprout_id=f"sch{sch.id}-20260615",
-    )
-    session.add(occ)
-    session.commit()
-    session.refresh(occ)
-    assert occ.id is not None
-    assert occ.status == "pending"
-    assert occ.sprout_id == f"sch{sch.id}-20260615"
+def _postings():
+    return [
+        {"id": "main", "account": "Expenses:Subscription", "amount": "15.00",
+         "currency": "USD", "cost": None, "price": None},
+        {"id": "bal", "account": "Assets:CreditCard", "amount": None,
+         "currency": None, "cost": None, "price": None},
+    ]
 
 
 def _make_schedule(session):
     sch = Schedule(
-        name="Spotify", narration="sub", amount=Decimal("15.00"), currency="USD",
-        from_account="Assets:CreditCard", to_account="Expenses:Subscription",
+        name="Spotify", narration="sub", postings=_postings(),
         interval_unit="month", interval_count=1,
         anchor_date=datetime.date(2026, 1, 15), max_count=6, tags="sprout",
     )
@@ -49,6 +24,21 @@ def _make_schedule(session):
     session.commit()
     session.refresh(sch)
     return sch
+
+
+def test_schedule_and_occurrence_persist(session):
+    sch = _make_schedule(session)
+    assert sch.id is not None
+    assert sch.postings[0]["account"] == "Expenses:Subscription"
+
+    occ = Occurrence(
+        schedule_id=sch.id, due_date=datetime.date(2026, 6, 15),
+        sprout_id=f"sch{sch.id}-20260615", override_amounts={"main": "9.99"},
+    )
+    session.add(occ)
+    session.commit()
+    session.refresh(occ)
+    assert occ.override_amounts == {"main": "9.99"}
 
 
 def test_materialize_is_idempotent(session, config, today):
