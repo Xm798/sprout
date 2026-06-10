@@ -118,3 +118,92 @@ def test_confirm_is_idempotent_no_duplicate(session, config, today):
     services.confirm_occurrence(session, config, occ.id)
     written = Path(config.ledger_root, "sprout.bean").read_text()
     assert written.count(occ.sprout_id) == 1
+
+
+def test_update_schedule_preserves_overrides_on_narration_edit(session, config, today):
+    from app.models import ScheduleCreate
+    sch = _make_schedule(session)
+    services.materialize_occurrences(session, config, today)
+    occ = _first_occ(session, sch)
+    occ.override_amounts = {"main": "9.99"}
+    session.add(occ)
+    session.commit()
+
+    payload = ScheduleCreate(
+        name="Spotify", narration="new memo", postings=_postings(),
+        interval_unit="month", interval_count=1,
+        anchor_date=datetime.date(2026, 1, 15), max_count=6, tags="sprout",
+    )
+    services.update_schedule(session, sch.id, payload)
+
+    session.refresh(occ)
+    assert occ.override_amounts == {"main": "9.99"}
+
+
+def test_update_schedule_clears_override_when_posting_account_changes(session, config, today):
+    from app.models import ScheduleCreate
+    sch = _make_schedule(session)
+    services.materialize_occurrences(session, config, today)
+    occ = _first_occ(session, sch)
+    occ.override_amounts = {"main": "9.99"}
+    session.add(occ)
+    session.commit()
+
+    changed = _postings()
+    changed[0]["account"] = "Expenses:Music"  # same id "main", different structure
+    payload = ScheduleCreate(
+        name="Spotify", narration="sub", postings=changed,
+        interval_unit="month", interval_count=1,
+        anchor_date=datetime.date(2026, 1, 15), max_count=6, tags="sprout",
+    )
+    services.update_schedule(session, sch.id, payload)
+
+    session.refresh(occ)
+    assert occ.override_amounts == {}
+
+
+def test_update_schedule_partial_clear_keeps_unrelated_override(session, config, today):
+    from app.models import ScheduleCreate
+    three = [
+        {"id": "main", "account": "Expenses:Subscription", "amount": "15.00", "currency": "USD", "cost": None, "price": None},
+        {"id": "extra", "account": "Expenses:Fees", "amount": "2.00", "currency": "USD", "cost": None, "price": None},
+        {"id": "bal", "account": "Assets:CreditCard", "amount": None, "currency": None, "cost": None, "price": None},
+    ]
+    sch = Schedule(name="Spotify", narration="sub", postings=three, interval_unit="month",
+                   interval_count=1, anchor_date=datetime.date(2026, 1, 15), max_count=6, tags="sprout")
+    session.add(sch); session.commit(); session.refresh(sch)
+    services.materialize_occurrences(session, config, today)
+    occ = _first_occ(session, sch)
+    occ.override_amounts = {"main": "9.99", "extra": "3.00"}
+    session.add(occ); session.commit()
+
+    changed = [dict(p) for p in three]
+    changed[1]["account"] = "Expenses:OtherFees"  # structural change to "extra" only
+    payload = ScheduleCreate(name="Spotify", narration="sub", postings=changed, interval_unit="month",
+                             interval_count=1, anchor_date=datetime.date(2026, 1, 15), max_count=6, tags="sprout")
+    services.update_schedule(session, sch.id, payload)
+    session.refresh(occ)
+    assert occ.override_amounts == {"main": "9.99"}  # extra cleared, main kept
+
+
+def test_update_schedule_clears_override_for_deleted_posting(session, config, today):
+    from app.models import ScheduleCreate
+    three = [
+        {"id": "main", "account": "Expenses:Subscription", "amount": "15.00", "currency": "USD", "cost": None, "price": None},
+        {"id": "extra", "account": "Expenses:Fees", "amount": "2.00", "currency": "USD", "cost": None, "price": None},
+        {"id": "bal", "account": "Assets:CreditCard", "amount": None, "currency": None, "cost": None, "price": None},
+    ]
+    sch = Schedule(name="Spotify", narration="sub", postings=three, interval_unit="month",
+                   interval_count=1, anchor_date=datetime.date(2026, 1, 15), max_count=6, tags="sprout")
+    session.add(sch); session.commit(); session.refresh(sch)
+    services.materialize_occurrences(session, config, today)
+    occ = _first_occ(session, sch)
+    occ.override_amounts = {"main": "9.99", "extra": "3.00"}
+    session.add(occ); session.commit()
+
+    without_extra = [three[0], three[2]]  # drop "extra" entirely
+    payload = ScheduleCreate(name="Spotify", narration="sub", postings=without_extra, interval_unit="month",
+                             interval_count=1, anchor_date=datetime.date(2026, 1, 15), max_count=6, tags="sprout")
+    services.update_schedule(session, sch.id, payload)
+    session.refresh(occ)
+    assert occ.override_amounts == {"main": "9.99"}  # deleted posting's override cleared

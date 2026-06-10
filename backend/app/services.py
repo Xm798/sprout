@@ -4,10 +4,10 @@ from typing import Optional
 from sqlmodel import Session, select
 
 from app.config import AppConfig
-from app.models import Schedule, Occurrence
+from app.models import Schedule, Occurrence, ScheduleCreate
 from app.due_engine import compute_due_dates
 from app.bean_format import format_transaction
-from app.postings import Posting, parse_postings, validate_postings
+from app.postings import Posting, parse_postings, validate_postings, struct_key
 from app.ledger import validate_snippet
 from app.writer import target_path, append_transaction
 
@@ -142,3 +142,37 @@ def skip_occurrence(session: Session, occurrence_id: int) -> Occurrence:
     session.commit()
     session.refresh(occ)
     return occ
+
+
+def update_schedule(session: Session, schedule_id: int, payload: ScheduleCreate) -> Schedule:
+    sch = session.get(Schedule, schedule_id)
+    if sch is None:
+        raise LookupError(f"schedule {schedule_id} not found")
+
+    old = {p.id: struct_key(p) for p in parse_postings(sch.postings)}
+    new = {p.id: struct_key(p) for p in payload.postings}
+
+    for key, value in payload.model_dump().items():
+        setattr(sch, key, value)
+    sch.updated_at = datetime.datetime.now()
+
+    pendings = session.exec(
+        select(Occurrence).where(
+            Occurrence.schedule_id == schedule_id, Occurrence.status == "pending"
+        )
+    ).all()
+    for occ in pendings:
+        if not occ.override_amounts:
+            continue
+        kept = {
+            pid: amt for pid, amt in occ.override_amounts.items()
+            if pid in new and new[pid] == old.get(pid)
+        }
+        if kept != dict(occ.override_amounts):
+            occ.override_amounts = kept
+            session.add(occ)
+
+    session.add(sch)
+    session.commit()
+    session.refresh(sch)
+    return sch
