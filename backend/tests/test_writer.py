@@ -34,6 +34,24 @@ def test_root_defaults_to_main_dir(tmp_path):
     assert p == Path(tmp_path) / "sprout.bean"
 
 
+def test_target_file_overrides_single_file_mode(tmp_path):
+    cfg = _cfg(tmp_path)
+    p = target_path(cfg, datetime.date(2026, 6, 15), target_file="rent.bean")
+    assert p == Path(tmp_path) / "rent.bean"
+
+
+def test_target_file_overrides_month_file_mode(tmp_path):
+    cfg = _cfg(tmp_path, write_mode="month_file")
+    p = target_path(cfg, datetime.date(2026, 6, 15), target_file="loans/mortgage.bean")
+    assert p == Path(tmp_path) / "loans" / "mortgage.bean"
+
+
+def test_target_file_uses_root_fallback(tmp_path):
+    cfg = _cfg(tmp_path, ledger_root="")
+    p = target_path(cfg, datetime.date(2026, 6, 15), target_file="rent.bean")
+    assert p == Path(tmp_path) / "rent.bean"  # falls back to main file's directory
+
+
 def test_append_creates_and_appends(tmp_path):
     cfg = _cfg(tmp_path)
     p = target_path(cfg, datetime.date(2026, 6, 15))
