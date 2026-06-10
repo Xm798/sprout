@@ -83,21 +83,17 @@ def _validate_effective(postings: list[Posting], merged: dict) -> list[Posting]:
 
 def render_occurrence(
     occ: Occurrence, sch: Schedule, *,
-    override_amounts: Optional[dict] = None,
+    effective_postings: list[Posting],
     override_date: Optional[datetime.date] = None,
     override_narration: Optional[str] = None,
-    _postings: Optional[list[Posting]] = None,
 ) -> str:
     """Pure render of an occurrence's transaction. `override_*` are transient
     (not persisted); when None, the occurrence's stored values are used.
-    Pass `_postings` to skip recomputation when already validated upstream."""
+    `effective_postings` are the pre-validated postings supplied by the caller."""
     date, narration = _effective_meta(occ, sch, override_date=override_date, override_narration=override_narration)
-    postings = _postings if _postings is not None else _apply_overrides(
-        parse_postings(sch.postings), _merged_overrides(occ, override_amounts)
-    )
     tags = [t.strip() for t in sch.tags.split(",") if t.strip()]
     return format_transaction(
-        date=date, payee=sch.name, narration=narration, postings=postings,
+        date=date, payee=sch.name, narration=narration, postings=effective_postings,
         tags=tags, meta={"sprout-id": occ.sprout_id},
     )
 
@@ -114,7 +110,7 @@ def build_preview(session: Session, occurrence_id: int, **transient) -> str:
     # stale stored keys must error too, not just incoming ones.
     merged = _merged_overrides(occ, transient.get("override_amounts"))
     effective = _validate_effective(postings, merged)
-    return render_occurrence(occ, sch, _postings=effective, **{
+    return render_occurrence(occ, sch, effective_postings=effective, **{
         k: v for k, v in transient.items() if k != "override_amounts"
     })
 
@@ -148,7 +144,7 @@ def confirm_occurrence(
     if override_narration is not None:
         occ.override_narration = override_narration
 
-    text = render_occurrence(occ, sch, _postings=effective)
+    text = render_occurrence(occ, sch, effective_postings=effective)
     snippet_errors = validate_snippet(config.ledger_main_file, text)
     if snippet_errors:
         raise ValueError("; ".join(snippet_errors))
