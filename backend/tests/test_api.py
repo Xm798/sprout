@@ -294,3 +294,45 @@ def test_confirm_orphan_occurrence_404(client):
     _forge_orphan_occurrence(occ_id)
     r = client.post(f"/api/inbox/{occ_id}/confirm", json={})
     assert r.status_code == 404
+
+
+# ── schedule edited between preview and confirm ─────────────────────────────────
+
+def test_confirm_rejects_override_for_leg_renamed_after_preview(client, tmp_path):
+    """If the schedule's amount-leg posting id changes between preview and confirm,
+    confirming with the now-stale id must 422 (occurrence stays pending, ledger
+    untouched), while confirming with the new id succeeds and writes the override."""
+    sid = client.post("/api/schedules", json=_new_schedule_payload()).json()["id"]
+    occ_id = client.get("/api/inbox").json()[0]["id"]
+    ledger = tmp_path / "sprout.bean"
+
+    # Preview an override keyed on the original amount-leg id ("main").
+    prev = client.post(
+        f"/api/inbox/{occ_id}/preview", json={"override_amounts": {"main": "12.34"}}
+    )
+    assert prev.status_code == 200, prev.text
+    assert "12.34" in prev.json()["text"]
+
+    # Rename the amount leg's posting id, mirroring a user editing the schedule.
+    edited = _new_schedule_payload()
+    edited["postings"][0]["id"] = "main2"
+    assert client.put(f"/api/schedules/{sid}", json=edited).status_code == 200
+
+    # Confirming with the stale id must be rejected, leave the occurrence pending,
+    # and write nothing to the ledger.
+    stale = client.post(
+        f"/api/inbox/{occ_id}/confirm", json={"override_amounts": {"main": "12.34"}}
+    )
+    assert stale.status_code == 422
+    assert "main" in stale.json()["detail"]
+    inbox = client.get("/api/inbox").json()
+    assert any(o["id"] == occ_id and o["status"] == "pending" for o in inbox)
+    assert not ledger.exists()
+
+    # Confirming with the new id succeeds and persists the 12.34 override.
+    ok = client.post(
+        f"/api/inbox/{occ_id}/confirm", json={"override_amounts": {"main2": "12.34"}}
+    )
+    assert ok.status_code == 200, ok.text
+    assert ok.json()["status"] == "confirmed"
+    assert "12.34" in ledger.read_text()
