@@ -15,7 +15,18 @@ const NAV = [
 export function AppShell({ children }: { children: ReactNode }) {
   return (
     <div className="min-h-screen">
-      <header className="sticky top-0 z-40 border-b border-border/60 bg-background/80 backdrop-blur-xl">
+      {/*
+        The blur/translucent background lives on an absolutely-positioned sibling
+        layer, NOT on <header> itself. A `backdrop-filter` on the header would
+        establish a containing block for the fixed mobile nav below, pinning its
+        `bottom-0` to the header's bottom edge (i.e. the top of the screen)
+        instead of the viewport.
+      */}
+      <header className="sticky top-0 z-40 border-b border-border/60">
+        <div
+          aria-hidden
+          className="absolute inset-0 -z-10 bg-background/80 backdrop-blur-xl"
+        />
         <div className="container flex h-16 items-center justify-between gap-4">
           <NavLink to="/" className="flex items-center gap-2.5">
             <span className="grid h-9 w-9 place-items-center rounded-xl bg-primary/10 text-primary shadow-soft">
