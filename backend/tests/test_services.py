@@ -324,3 +324,56 @@ def test_preview_malformed_amount_friendly_message(session, config, today):
 
     with pytest.raises(ValueError, match="is not a number"):
         services.build_preview(session, occ.id, override_amounts={"main": "abc"})
+
+
+# ── override pruning covers skipped occurrences ───────────────────────────────
+
+def test_update_schedule_prunes_stale_override_on_skipped_occurrence(session, config, today):
+    """update_schedule must prune stale overrides from SKIPPED occurrences, not just pending."""
+    from app.models import ScheduleCreate
+    sch = _make_schedule(session)
+    services.materialize_occurrences(session, config, today)
+    occ = _first_occ(session, sch)
+    # Mark the occurrence as skipped and give it an override that will go stale
+    occ.override_amounts = {"main": "9.99"}
+    occ.status = "skipped"
+    session.add(occ)
+    session.commit()
+
+    changed = _postings()
+    changed[0]["account"] = "Expenses:Music"  # structural change makes override stale
+    payload = ScheduleCreate(
+        name="Spotify", narration="sub", postings=changed,
+        interval_unit="month", interval_count=1,
+        anchor_date=datetime.date(2026, 1, 15), max_count=6, tags="sprout",
+    )
+    services.update_schedule(session, sch.id, payload)
+
+    session.refresh(occ)
+    assert occ.override_amounts == {}
+
+
+def test_update_schedule_confirmed_occurrence_override_untouched(session, config, today):
+    """update_schedule must NOT prune overrides from CONFIRMED occurrences (historical record)."""
+    from app.models import ScheduleCreate
+    sch = _make_schedule(session)
+    services.materialize_occurrences(session, config, today)
+    occ = _first_occ(session, sch)
+    # Simulate a confirmed occurrence with stored override
+    occ.override_amounts = {"main": "9.99"}
+    occ.status = "confirmed"
+    session.add(occ)
+    session.commit()
+
+    changed = _postings()
+    changed[0]["account"] = "Expenses:Music"  # structural change
+    payload = ScheduleCreate(
+        name="Spotify", narration="sub", postings=changed,
+        interval_unit="month", interval_count=1,
+        anchor_date=datetime.date(2026, 1, 15), max_count=6, tags="sprout",
+    )
+    services.update_schedule(session, sch.id, payload)
+
+    session.refresh(occ)
+    # Confirmed occurrence's override must remain intact
+    assert occ.override_amounts == {"main": "9.99"}

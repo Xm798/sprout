@@ -61,9 +61,8 @@ def update(schedule_id: int, payload: ScheduleCreate, session: Session = Depends
 
 @router.delete("/{schedule_id}")
 def delete(schedule_id: int, session: Session = Depends(get_session)) -> dict:
-    sch = session.get(Schedule, schedule_id)
-    if sch is None:
-        raise HTTPException(404, "schedule not found")
-    session.delete(sch)
-    session.commit()
+    try:
+        services.delete_schedule(session, schedule_id)
+    except LookupError as exc:
+        raise HTTPException(404, str(exc))
     return {"ok": True}

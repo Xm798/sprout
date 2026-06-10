@@ -225,3 +225,60 @@ def test_post_preview_stale_stored_override_key_422(client):
     r = client.post(f"/api/inbox/{occ_id}/preview", json={"override_amounts": {"main": "7.50"}})
     assert r.status_code == 422
     assert "stale" in r.json()["detail"]
+
+
+# ── cascade delete ─────────────────────────────────────────────────────────────
+
+def test_delete_schedule_removes_occurrences(client):
+    """Deleting a schedule must remove all its occurrences from GET /inbox."""
+    client.post("/api/schedules", json=_new_schedule_payload())
+    inbox_before = client.get("/api/inbox").json()
+    assert len(inbox_before) >= 1
+    sid = inbox_before[0]["schedule_id"]
+    r = client.delete(f"/api/schedules/{sid}")
+    assert r.status_code == 200
+    assert r.json()["ok"] is True
+    # Occurrences for this schedule must not appear in inbox
+    inbox_after = client.get("/api/inbox").json()
+    assert all(o["schedule_id"] != sid for o in inbox_after)
+
+
+def test_delete_missing_schedule_404(client):
+    assert client.delete("/api/schedules/99999").status_code == 404
+
+
+# ── orphan occurrence → 404 ────────────────────────────────────────────────────
+
+def _forge_orphan_occurrence(occ_id: int) -> None:
+    """Delete the schedule row while leaving the occurrence row intact,
+    simulating pre-fix data (or a non-cascade delete)."""
+    from app.models import Schedule
+    session = next(app.dependency_overrides[get_session]())
+    occ = session.get(__import__("app.models", fromlist=["Occurrence"]).Occurrence, occ_id)
+    sch = session.get(Schedule, occ.schedule_id)
+    session.delete(sch)
+    session.commit()
+
+
+def test_get_preview_orphan_occurrence_404(client):
+    """GET /inbox/{id}/preview on an orphan occurrence returns 404, not 500."""
+    occ_id = _inbox_occ_id(client)
+    _forge_orphan_occurrence(occ_id)
+    r = client.get(f"/api/inbox/{occ_id}/preview")
+    assert r.status_code == 404
+
+
+def test_post_preview_orphan_occurrence_404(client):
+    """POST /inbox/{id}/preview on an orphan occurrence returns 404, not 500."""
+    occ_id = _inbox_occ_id(client)
+    _forge_orphan_occurrence(occ_id)
+    r = client.post(f"/api/inbox/{occ_id}/preview", json={})
+    assert r.status_code == 404
+
+
+def test_confirm_orphan_occurrence_404(client):
+    """POST /inbox/{id}/confirm on an orphan occurrence returns 404, not 500."""
+    occ_id = _inbox_occ_id(client)
+    _forge_orphan_occurrence(occ_id)
+    r = client.post(f"/api/inbox/{occ_id}/confirm", json={})
+    assert r.status_code == 404

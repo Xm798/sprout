@@ -89,6 +89,8 @@ def build_preview(session: Session, occurrence_id: int, **transient) -> str:
     if occ is None:
         raise LookupError(f"occurrence {occurrence_id} not found")
     sch = session.get(Schedule, occ.schedule_id)
+    if sch is None:
+        raise LookupError(f"schedule {occ.schedule_id} not found")
     postings = parse_postings(sch.postings)
     # Validate the MERGED overrides (stored + transient), mirroring confirm:
     # stale stored keys must error too, not just incoming ones.
@@ -114,6 +116,8 @@ def confirm_occurrence(
     if occ.status == "confirmed":
         return occ
     sch = session.get(Schedule, occ.schedule_id)
+    if sch is None:
+        raise LookupError(f"schedule {occ.schedule_id} not found")
 
     # Validate before mutating — compute effective postings from the incoming
     # overrides merged over any stored ones, then check structural errors and
@@ -178,7 +182,7 @@ def update_schedule(session: Session, schedule_id: int, payload: ScheduleCreate)
 
     pendings = session.exec(
         select(Occurrence).where(
-            Occurrence.schedule_id == schedule_id, Occurrence.status == "pending"
+            Occurrence.schedule_id == schedule_id, Occurrence.status != "confirmed"
         )
     ).all()
     for occ in pendings:
@@ -196,3 +200,16 @@ def update_schedule(session: Session, schedule_id: int, payload: ScheduleCreate)
     session.commit()
     session.refresh(sch)
     return sch
+
+
+def delete_schedule(session: Session, schedule_id: int) -> None:
+    sch = session.get(Schedule, schedule_id)
+    if sch is None:
+        raise LookupError(f"schedule {schedule_id} not found")
+    occs = session.exec(
+        select(Occurrence).where(Occurrence.schedule_id == schedule_id)
+    ).all()
+    for occ in occs:
+        session.delete(occ)
+    session.delete(sch)
+    session.commit()
