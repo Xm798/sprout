@@ -1,6 +1,8 @@
 import datetime
 from pathlib import Path
 
+import sqlmodel
+
 from app.models import Schedule, Occurrence
 from app import services
 
@@ -50,12 +52,16 @@ def test_materialize_is_idempotent(session, config, today):
     assert created_second == 0
 
 
+def _first_occ(session, sch):
+    return session.exec(
+        sqlmodel.select(Occurrence).where(Occurrence.schedule_id == sch.id)
+    ).first()
+
+
 def test_preview_renders_expected_text(session, config, today):
     sch = _make_schedule(session)
     services.materialize_occurrences(session, config, today)
-    occ = session.exec(
-        __import__("sqlmodel").select(Occurrence).where(Occurrence.schedule_id == sch.id)
-    ).first()
+    occ = _first_occ(session, sch)
     text = services.build_preview(session, occ.id)
     assert '"Spotify" "sub" #sprout' in text
     assert f'sprout-id: "{occ.sprout_id}"' in text
@@ -63,37 +69,43 @@ def test_preview_renders_expected_text(session, config, today):
     assert "Assets:CreditCard\n" in text
 
 
+def test_preview_applies_per_leg_override(session, config, today):
+    sch = _make_schedule(session)
+    services.materialize_occurrences(session, config, today)
+    occ = _first_occ(session, sch)
+    occ.override_amounts = {"main": "9.99"}
+    session.add(occ)
+    session.commit()
+    text = services.build_preview(session, occ.id)
+    assert "Expenses:Subscription  9.99 USD" in text
+
+
+def test_confirm_with_override_amounts(session, config, today):
+    sch = _make_schedule(session)
+    services.materialize_occurrences(session, config, today)
+    occ = _first_occ(session, sch)
+    services.confirm_occurrence(session, config, occ.id, override_amounts={"main": "9.99"})
+    written = Path(config.ledger_root, "sprout.bean").read_text()
+    assert "9.99 USD" in written
+    session.refresh(occ)
+    assert occ.override_amounts == {"main": "9.99"}
+
+
 def test_confirm_writes_and_marks(session, config, today):
     sch = _make_schedule(session)
     services.materialize_occurrences(session, config, today)
-    occ = session.exec(
-        __import__("sqlmodel").select(Occurrence).where(Occurrence.schedule_id == sch.id)
-    ).first()
+    occ = _first_occ(session, sch)
     result = services.confirm_occurrence(session, config, occ.id)
     assert result.status == "confirmed"
-    assert result.written_path is not None
     written = Path(result.written_path).read_text()
     assert occ.sprout_id in written
     assert "Expenses:Subscription" in written
 
 
-def test_confirm_with_amount_override(session, config, today):
-    sch = _make_schedule(session)
-    services.materialize_occurrences(session, config, today)
-    occ = session.exec(
-        __import__("sqlmodel").select(Occurrence).where(Occurrence.schedule_id == sch.id)
-    ).first()
-    services.confirm_occurrence(session, config, occ.id, override_amount=Decimal("9.99"))
-    written = Path(config.ledger_root, "sprout.bean").read_text()
-    assert "9.99 USD" in written
-
-
 def test_skip_marks_skipped(session, config, today):
     sch = _make_schedule(session)
     services.materialize_occurrences(session, config, today)
-    occ = session.exec(
-        __import__("sqlmodel").select(Occurrence).where(Occurrence.schedule_id == sch.id)
-    ).first()
+    occ = _first_occ(session, sch)
     result = services.skip_occurrence(session, occ.id)
     assert result.status == "skipped"
 
@@ -101,9 +113,7 @@ def test_skip_marks_skipped(session, config, today):
 def test_confirm_is_idempotent_no_duplicate(session, config, today):
     sch = _make_schedule(session)
     services.materialize_occurrences(session, config, today)
-    occ = session.exec(
-        __import__("sqlmodel").select(Occurrence).where(Occurrence.schedule_id == sch.id)
-    ).first()
+    occ = _first_occ(session, sch)
     services.confirm_occurrence(session, config, occ.id)
     services.confirm_occurrence(session, config, occ.id)
     written = Path(config.ledger_root, "sprout.bean").read_text()
