@@ -27,8 +27,7 @@ class Posting(BaseModel):
 
 def _is_decimal(s: str) -> bool:
     try:
-        Decimal(s)
-        return True
+        return Decimal(s).is_finite()
     except (InvalidOperation, TypeError, ValueError):
         return False
 
@@ -45,6 +44,11 @@ def validate_postings(postings: list[Posting], *, require_blank_leg: bool = Fals
     errors: list[str] = []
     if len(postings) < 2:
         errors.append("a transaction needs at least 2 postings")
+    seen_ids: set[str] = set()
+    for p in postings:
+        if p.id in seen_ids:
+            errors.append(f"duplicate posting id {p.id!r}")
+        seen_ids.add(p.id)
     blank = [p for p in postings if p.amount is None]
     amount_legs = [p for p in postings if p.amount is not None]
     if len(blank) > 1:
@@ -76,11 +80,13 @@ def headline(postings: list[Posting]) -> tuple[Optional[str], Optional[str]]:
 
 
 def struct_key(p: Posting) -> tuple:
-    """Identity of a posting's structure, ignoring its amount — used to decide
-    whether an occurrence's override for this posting id is still valid."""
+    """Identity of a posting's structure, ignoring its amount value — used to decide
+    whether an occurrence's override for this posting id is still valid.
+    Includes whether the leg carries an amount so that flipping amount↔blank is detected."""
     return (
         p.account,
         p.currency,  # the leg's own commodity, intentionally distinct from cost/price currency
         p.cost.model_dump() if p.cost else None,
         p.price.model_dump() if p.price else None,
+        p.amount is not None,  # has-amount boolean; detects amount↔blank flip
     )

@@ -203,6 +203,35 @@ def test_tags_with_spaces_render_cleanly(session, config, today):
     assert "# b" not in text
 
 
+def test_update_schedule_clears_override_when_leg_flips_amount_to_blank(session, config, today):
+    """Flipping a leg from amount-bearing to blank (same account/currency) must prune its override."""
+    from app.models import ScheduleCreate
+    sch = _make_schedule(session)
+    services.materialize_occurrences(session, config, today)
+    occ = _first_occ(session, sch)
+    occ.override_amounts = {"main": "9.99"}
+    session.add(occ)
+    session.commit()
+
+    # Flip "main" from amount-leg to blank auto-balance leg; keep "bal" as amount-leg
+    flipped = [
+        {"id": "main", "account": "Expenses:Subscription", "amount": None,
+         "currency": None, "cost": None, "price": None},
+        {"id": "bal", "account": "Assets:CreditCard", "amount": "15.00",
+         "currency": "USD", "cost": None, "price": None},
+    ]
+    payload = ScheduleCreate(
+        name="Spotify", narration="sub", postings=flipped,
+        interval_unit="month", interval_count=1,
+        anchor_date=datetime.date(2026, 1, 15), max_count=6, tags="sprout",
+    )
+    services.update_schedule(session, sch.id, payload)
+
+    session.refresh(occ)
+    # Override for "main" must be pruned because the leg is now blank
+    assert occ.override_amounts == {}
+
+
 def test_update_schedule_clears_override_for_deleted_posting(session, config, today):
     from app.models import ScheduleCreate
     three = [

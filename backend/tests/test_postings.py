@@ -89,3 +89,58 @@ def test_validate_accepts_valid_decimal_amount():
     good = _amount_leg(amount="42.50")
     blank = Posting(id="p2", account="Assets:Cash")
     assert validate_postings([good, blank]) == []
+
+
+# --- Defect 1: non-finite decimal values must be rejected ---
+
+def test_validate_rejects_nan_amount():
+    bad = _amount_leg(amount="NaN")
+    blank = Posting(id="p2", account="Assets:Cash")
+    errors = validate_postings([bad, blank])
+    assert any("not a number" in e for e in errors)
+
+
+def test_validate_rejects_infinity_amount():
+    bad = _amount_leg(amount="Infinity")
+    blank = Posting(id="p2", account="Assets:Cash")
+    errors = validate_postings([bad, blank])
+    assert any("not a number" in e for e in errors)
+
+
+def test_validate_rejects_negative_infinity_amount():
+    bad = _amount_leg(amount="-Infinity")
+    blank = Posting(id="p2", account="Assets:Cash")
+    errors = validate_postings([bad, blank])
+    assert any("not a number" in e for e in errors)
+
+
+# --- Defect 2: duplicate posting ids must be rejected ---
+
+def test_validate_rejects_duplicate_posting_ids():
+    p1 = _amount_leg(id="p1", account="Expenses:Food", amount="10.00")
+    p2 = _amount_leg(id="p1", account="Expenses:Other", amount="5.00")  # duplicate id
+    blank = Posting(id="p3", account="Assets:Cash")
+    errors = validate_postings([p1, p2, blank])
+    assert any("p1" in e for e in errors)
+
+
+def test_validate_accepts_unique_posting_ids():
+    p1 = _amount_leg(id="p1")
+    blank = Posting(id="p2", account="Assets:Cash")
+    assert validate_postings([p1, blank]) == []
+
+
+# --- Defect 3: struct_key must reflect whether a leg carries an amount ---
+
+def test_struct_key_changes_when_leg_flips_to_blank():
+    """Flipping a leg from amount-bearing to blank changes struct_key."""
+    amount_leg = _amount_leg(id="p1", account="Assets:Cash", amount="10.00", currency="USD")
+    blank_leg = Posting(id="p1", account="Assets:Cash")  # same account/currency, no amount
+    assert struct_key(amount_leg) != struct_key(blank_leg)
+
+
+def test_struct_key_stable_under_amount_value_change():
+    """Changing only the amount value must NOT change struct_key (overrides survive)."""
+    a = _amount_leg(amount="15.00")
+    b = _amount_leg(amount="99.00")
+    assert struct_key(a) == struct_key(b)
