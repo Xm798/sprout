@@ -377,3 +377,38 @@ def test_update_schedule_confirmed_occurrence_override_untouched(session, config
     session.refresh(occ)
     # Confirmed occurrence's override must remain intact
     assert occ.override_amounts == {"main": "9.99"}
+
+
+# ── cascade delete (service level) ─────────────────────────────────────────────
+
+def test_delete_schedule_removes_occurrences_of_all_statuses(session, config, today):
+    """delete_schedule must remove occurrence rows of ALL statuses
+    (pending, skipped, confirmed) from the DB along with the schedule."""
+    sch = _make_schedule(session)
+    services.materialize_occurrences(session, config, today)
+    occs = session.exec(
+        sqlmodel.select(Occurrence).where(Occurrence.schedule_id == sch.id)
+    ).all()
+    assert len(occs) >= 3
+    # Cover every status: confirmed history lives in the ledger files,
+    # so deleting the row does not destroy ledger data.
+    occs[0].status = "pending"
+    occs[1].status = "skipped"
+    occs[2].status = "confirmed"
+    for occ in occs[:3]:
+        session.add(occ)
+    session.commit()
+
+    services.delete_schedule(session, sch.id)
+
+    assert session.get(Schedule, sch.id) is None
+    remaining = session.exec(
+        sqlmodel.select(Occurrence).where(Occurrence.schedule_id == sch.id)
+    ).all()
+    assert remaining == []
+
+
+def test_delete_schedule_missing_raises_lookup_error(session):
+    import pytest
+    with pytest.raises(LookupError):
+        services.delete_schedule(session, 99999)

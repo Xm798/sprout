@@ -230,17 +230,28 @@ def test_post_preview_stale_stored_override_key_422(client):
 # ── cascade delete ─────────────────────────────────────────────────────────────
 
 def test_delete_schedule_removes_occurrences(client):
-    """Deleting a schedule must remove all its occurrences from GET /inbox."""
+    """Deleting a schedule must remove all its occurrences from GET /inbox
+    and from the DB (all statuses, not just pending)."""
+    from sqlmodel import select
+    from app.models import Occurrence
     client.post("/api/schedules", json=_new_schedule_payload())
     inbox_before = client.get("/api/inbox").json()
     assert len(inbox_before) >= 1
     sid = inbox_before[0]["schedule_id"]
+    # Move one occurrence out of "pending" so the DB check covers non-pending rows
+    client.post(f"/api/inbox/{inbox_before[0]['id']}/skip")
     r = client.delete(f"/api/schedules/{sid}")
     assert r.status_code == 200
     assert r.json()["ok"] is True
     # Occurrences for this schedule must not appear in inbox
     inbox_after = client.get("/api/inbox").json()
     assert all(o["schedule_id"] != sid for o in inbox_after)
+    # DB-level: no occurrence rows of ANY status survive
+    session = next(app.dependency_overrides[get_session]())
+    remaining = session.exec(
+        select(Occurrence).where(Occurrence.schedule_id == sid)
+    ).all()
+    assert remaining == []
 
 
 def test_delete_missing_schedule_404(client):
