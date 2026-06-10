@@ -278,7 +278,6 @@ def test_migration_raises_on_malformed_postings_json():
     naming both the occurrence id and schedule id (not JSONDecodeError)."""
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
     with engine.begin() as conn:
-        # New-style schedule with broken postings JSON
         conn.execute(text(
             "CREATE TABLE schedule ("
             "id INTEGER PRIMARY KEY, name TEXT, narration TEXT,"
@@ -292,7 +291,6 @@ def test_migration_raises_on_malformed_postings_json():
             " interval_count, anchor_date, tags, status)"
             " VALUES (5, 'B', 'bad', :p, 'month', 1, '2026-01-01', '', 'active')"
         ), {"p": "NOT_VALID_JSON"})
-
         conn.execute(text(
             "CREATE TABLE occurrence ("
             "id INTEGER PRIMARY KEY, schedule_id INTEGER, due_date DATE, status TEXT,"
@@ -304,34 +302,9 @@ def test_migration_raises_on_malformed_postings_json():
             " VALUES (42, 5, '2026-06-15', 'pending', 11.00)"
         ))
 
-    with pytest.raises(ValueError, match=r"occurrence id=42"):
+    with pytest.raises(ValueError, match=r"occurrence id=42.*schedule id=5"):
         migrate_legacy_schema(engine)
 
-    with pytest.raises(ValueError, match=r"schedule id=5"):
-        # Re-create engine fresh and try again (state wasn't mutated)
-        engine2 = create_engine("sqlite://", connect_args={"check_same_thread": False})
-        with engine2.begin() as conn:
-            conn.execute(text(
-                "CREATE TABLE schedule ("
-                "id INTEGER PRIMARY KEY, name TEXT, narration TEXT,"
-                "postings JSON,"
-                "interval_unit TEXT, interval_count INTEGER, anchor_date DATE,"
-                "end_date DATE, max_count INTEGER, tags TEXT, status TEXT,"
-                "created_at DATETIME, updated_at DATETIME)"
-            ))
-            conn.execute(text(
-                "INSERT INTO schedule (id, name, narration, postings, interval_unit,"
-                " interval_count, anchor_date, tags, status)"
-                " VALUES (5, 'B', 'bad', :p, 'month', 1, '2026-01-01', '', 'active')"
-            ), {"p": "NOT_VALID_JSON"})
-            conn.execute(text(
-                "CREATE TABLE occurrence ("
-                "id INTEGER PRIMARY KEY, schedule_id INTEGER, due_date DATE, status TEXT,"
-                "override_amount NUMERIC, override_date DATE, override_narration TEXT,"
-                "written_path TEXT, sprout_id TEXT, confirmed_at DATETIME)"
-            ))
-            conn.execute(text(
-                "INSERT INTO occurrence (id, schedule_id, due_date, status, override_amount)"
-                " VALUES (42, 5, '2026-06-15', 'pending', 11.00)"
-            ))
-        migrate_legacy_schema(engine2)
+    # Schema must not have been mutated: setup error must prevent DDL.
+    occ_cols = {c["name"] for c in inspect(engine).get_columns("occurrence")}
+    assert "override_amounts" not in occ_cols

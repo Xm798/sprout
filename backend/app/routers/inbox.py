@@ -18,10 +18,8 @@ class ConfirmBody(BaseModel):
     override_narration: str | None = None
 
 
-class PreviewBody(BaseModel):
-    override_amounts: dict[str, str] | None = None
-    override_date: datetime.date | None = None
-    override_narration: str | None = None
+class PreviewBody(ConfirmBody):
+    pass
 
 
 def _config(session: Session) -> AppConfig:

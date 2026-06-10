@@ -1,9 +1,10 @@
 import datetime
 from pathlib import Path
 
+import pytest
 import sqlmodel
 
-from app.models import Schedule, Occurrence
+from app.models import Schedule, Occurrence, ScheduleCreate
 from app import services
 
 
@@ -121,7 +122,6 @@ def test_confirm_is_idempotent_no_duplicate(session, config, today):
 
 
 def test_update_schedule_preserves_overrides_on_narration_edit(session, config, today):
-    from app.models import ScheduleCreate
     sch = _make_schedule(session)
     services.materialize_occurrences(session, config, today)
     occ = _first_occ(session, sch)
@@ -141,7 +141,6 @@ def test_update_schedule_preserves_overrides_on_narration_edit(session, config, 
 
 
 def test_update_schedule_clears_override_when_posting_account_changes(session, config, today):
-    from app.models import ScheduleCreate
     sch = _make_schedule(session)
     services.materialize_occurrences(session, config, today)
     occ = _first_occ(session, sch)
@@ -163,7 +162,6 @@ def test_update_schedule_clears_override_when_posting_account_changes(session, c
 
 
 def test_update_schedule_partial_clear_keeps_unrelated_override(session, config, today):
-    from app.models import ScheduleCreate
     three = [
         {"id": "main", "account": "Expenses:Subscription", "amount": "15.00", "currency": "USD", "cost": None, "price": None},
         {"id": "extra", "account": "Expenses:Fees", "amount": "2.00", "currency": "USD", "cost": None, "price": None},
@@ -205,7 +203,6 @@ def test_tags_with_spaces_render_cleanly(session, config, today):
 
 def test_update_schedule_clears_override_when_leg_flips_amount_to_blank(session, config, today):
     """Flipping a leg from amount-bearing to blank (same account/currency) must prune its override."""
-    from app.models import ScheduleCreate
     sch = _make_schedule(session)
     services.materialize_occurrences(session, config, today)
     occ = _first_occ(session, sch)
@@ -233,7 +230,6 @@ def test_update_schedule_clears_override_when_leg_flips_amount_to_blank(session,
 
 
 def test_update_schedule_clears_override_for_deleted_posting(session, config, today):
-    from app.models import ScheduleCreate
     three = [
         {"id": "main", "account": "Expenses:Subscription", "amount": "15.00", "currency": "USD", "cost": None, "price": None},
         {"id": "extra", "account": "Expenses:Fees", "amount": "2.00", "currency": "USD", "cost": None, "price": None},
@@ -260,8 +256,6 @@ def test_update_schedule_clears_override_for_deleted_posting(session, config, to
 def test_confirm_unknown_override_key_raises_422(session, config, today):
     """Unknown posting id in override_amounts must raise ValueError, leave occ pending,
     leave the ledger file unwritten, and NOT persist the bogus key."""
-    import pytest
-    from pathlib import Path
     sch = _make_schedule(session)
     services.materialize_occurrences(session, config, today)
     occ = _first_occ(session, sch)
@@ -279,7 +273,6 @@ def test_confirm_unknown_override_key_raises_422(session, config, today):
 def test_confirm_malformed_amount_friendly_message(session, config, today):
     """confirm with a non-numeric amount must raise ValueError with the friendly
     'is not a number' message (not a raw decimal exception)."""
-    import pytest
     sch = _make_schedule(session)
     services.materialize_occurrences(session, config, today)
     occ = _first_occ(session, sch)
@@ -290,7 +283,6 @@ def test_confirm_malformed_amount_friendly_message(session, config, today):
 
 def test_preview_unknown_override_key_raises(session, config, today):
     """build_preview with an unknown posting id in override_amounts must raise ValueError."""
-    import pytest
     sch = _make_schedule(session)
     services.materialize_occurrences(session, config, today)
     occ = _first_occ(session, sch)
@@ -303,7 +295,6 @@ def test_preview_stale_stored_override_key_raises(session, config, today):
     """build_preview must validate the STORED occ.override_amounts too — a stale
     key (legacy data or orphaned by a schedule edit) must raise, even with no
     transient overrides passed (GET preview path)."""
-    import pytest
     sch = _make_schedule(session)
     services.materialize_occurrences(session, config, today)
     occ = _first_occ(session, sch)
@@ -317,7 +308,6 @@ def test_preview_stale_stored_override_key_raises(session, config, today):
 
 def test_preview_malformed_amount_friendly_message(session, config, today):
     """build_preview with a non-numeric amount must raise ValueError with the friendly message."""
-    import pytest
     sch = _make_schedule(session)
     services.materialize_occurrences(session, config, today)
     occ = _first_occ(session, sch)
@@ -330,7 +320,6 @@ def test_preview_malformed_amount_friendly_message(session, config, today):
 
 def test_update_schedule_prunes_stale_override_on_skipped_occurrence(session, config, today):
     """update_schedule must prune stale overrides from SKIPPED occurrences, not just pending."""
-    from app.models import ScheduleCreate
     sch = _make_schedule(session)
     services.materialize_occurrences(session, config, today)
     occ = _first_occ(session, sch)
@@ -355,7 +344,6 @@ def test_update_schedule_prunes_stale_override_on_skipped_occurrence(session, co
 
 def test_update_schedule_confirmed_occurrence_override_untouched(session, config, today):
     """update_schedule must NOT prune overrides from CONFIRMED occurrences (historical record)."""
-    from app.models import ScheduleCreate
     sch = _make_schedule(session)
     services.materialize_occurrences(session, config, today)
     occ = _first_occ(session, sch)
@@ -409,6 +397,5 @@ def test_delete_schedule_removes_occurrences_of_all_statuses(session, config, to
 
 
 def test_delete_schedule_missing_raises_lookup_error(session):
-    import pytest
     with pytest.raises(LookupError):
         services.delete_schedule(session, 99999)

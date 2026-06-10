@@ -30,8 +30,9 @@ engine = make_engine()
 
 
 def _dec_str(value) -> str:
-    """Canonical fixed-point string with >=2 decimals (matches bean_format render,
-    so a legacy `15` and a legacy Decimal('15.00000000') both store as '15.00')."""
+    """Canonical 2-decimal storage form for migrated legacy amounts.
+    Always produces at least 2 decimal places (e.g. 15 → '15.00'), which differs
+    from bean_format render that omits trailing zeros (e.g. '15')."""
     s = format(Decimal(str(value)), "f")
     if "." in s:
         integer_part, frac_part = s.split(".")
@@ -55,7 +56,7 @@ def _migrate_schedule(engine) -> None:
             "SELECT id, amount, currency, from_account, to_account FROM schedule"
         )).all()
 
-    updates: list[tuple[str, str]] = []  # (json_str, row_id)
+    updates: list[tuple[str, int]] = []  # (json_str, row_id)
     for r in rows:
         if r.amount is None:
             raise ValueError(
@@ -95,7 +96,7 @@ def _migrate_occurrence(engine) -> None:
             "SELECT id, schedule_id, override_amount FROM occurrence"
         )).all()
 
-        updates: list[tuple[str, str]] = []  # (json_str, occ_id)
+        updates: list[tuple[str, int]] = []  # (json_str, occ_id)
         for r in rows:
             data: dict[str, str] = {}
             if r.override_amount is not None:

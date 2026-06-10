@@ -8,6 +8,7 @@ from sqlmodel import SQLModel, Session
 from app.main import app
 from app.db import get_session
 from app.config import AppConfig
+from app.models import Occurrence
 from tests.conftest import make_test_engine
 
 
@@ -265,7 +266,7 @@ def _forge_orphan_occurrence(occ_id: int) -> None:
     simulating pre-fix data (or a non-cascade delete)."""
     from app.models import Schedule
     session = next(app.dependency_overrides[get_session]())
-    occ = session.get(__import__("app.models", fromlist=["Occurrence"]).Occurrence, occ_id)
+    occ = session.get(Occurrence, occ_id)
     sch = session.get(Schedule, occ.schedule_id)
     session.delete(sch)
     session.commit()

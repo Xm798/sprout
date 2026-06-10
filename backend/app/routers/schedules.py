@@ -3,7 +3,7 @@ from sqlmodel import Session, select
 
 from app.db import get_session
 from app.models import Schedule, ScheduleBase, ScheduleCreate, ScheduleRead
-from app.postings import parse_postings, validate_postings, headline
+from app.postings import parse_postings, validate_postings, headline, dump_postings
 from app import services
 
 router = APIRouter(prefix="/schedules")
@@ -29,7 +29,7 @@ def _validate_or_422(payload: ScheduleCreate) -> None:
 @router.post("", response_model=ScheduleRead)
 def create(payload: ScheduleCreate, session: Session = Depends(get_session)) -> ScheduleRead:
     _validate_or_422(payload)
-    sch = Schedule(**payload.model_dump())
+    sch = Schedule(**payload.model_dump(exclude={"postings"}), postings=dump_postings(payload.postings))
     session.add(sch)
     session.commit()
     session.refresh(sch)

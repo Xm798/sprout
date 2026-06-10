@@ -7,7 +7,7 @@ from app.config import AppConfig
 from app.models import Schedule, Occurrence, ScheduleCreate
 from app.due_engine import compute_due_dates
 from app.bean_format import format_transaction
-from app.postings import Posting, parse_postings, validate_postings, validate_overrides, struct_key
+from app.postings import Posting, parse_postings, dump_postings, validate_postings, validate_overrides, struct_key
 from app.ledger import validate_snippet
 from app.writer import target_path, append_transaction
 
@@ -38,9 +38,18 @@ def materialize_occurrences(session: Session, config: AppConfig, today: datetime
     return created
 
 
-def _effective_meta(occ: Occurrence, sch: Schedule):
-    date = occ.override_date or occ.due_date
-    narration = occ.override_narration if occ.override_narration is not None else sch.narration
+def _effective_meta(
+    occ: Occurrence, sch: Schedule, *,
+    override_date: Optional[datetime.date] = None,
+    override_narration: Optional[str] = None,
+):
+    date = override_date or occ.override_date or occ.due_date
+    if override_narration is not None:
+        narration = override_narration
+    elif occ.override_narration is not None:
+        narration = occ.override_narration
+    else:
+        narration = sch.narration
     return date, narration
 
 
@@ -54,11 +63,22 @@ def _apply_overrides(postings: list[Posting], overrides: dict) -> list[Posting]:
     return out
 
 
-def _effective_postings(occ: Occurrence, sch: Schedule, override_amounts: Optional[dict] = None) -> list[Posting]:
-    amounts = dict(occ.override_amounts or {})
-    if override_amounts:
-        amounts.update(override_amounts)
-    return _apply_overrides(parse_postings(sch.postings), amounts)
+def _merged_overrides(occ: Occurrence, incoming: Optional[dict]) -> dict:
+    """Merge stored override_amounts with transient incoming overrides."""
+    merged = dict(occ.override_amounts or {})
+    if incoming:
+        merged.update(incoming)
+    return merged
+
+
+def _validate_effective(postings: list[Posting], merged: dict) -> list[Posting]:
+    """Validate merged overrides and return effective postings, raising ValueError on errors."""
+    errors = validate_overrides(postings, merged)
+    effective = _apply_overrides(postings, merged)
+    errors += validate_postings(effective)
+    if errors:
+        raise ValueError("; ".join(errors))
+    return effective
 
 
 def render_occurrence(
@@ -66,17 +86,15 @@ def render_occurrence(
     override_amounts: Optional[dict] = None,
     override_date: Optional[datetime.date] = None,
     override_narration: Optional[str] = None,
+    _postings: Optional[list[Posting]] = None,
 ) -> str:
     """Pure render of an occurrence's transaction. `override_*` are transient
-    (not persisted); when None, the occurrence's stored values are used."""
-    date = override_date or occ.override_date or occ.due_date
-    if override_narration is not None:
-        narration = override_narration
-    elif occ.override_narration is not None:
-        narration = occ.override_narration
-    else:
-        narration = sch.narration
-    postings = _effective_postings(occ, sch, override_amounts)
+    (not persisted); when None, the occurrence's stored values are used.
+    Pass `_postings` to skip recomputation when already validated upstream."""
+    date, narration = _effective_meta(occ, sch, override_date=override_date, override_narration=override_narration)
+    postings = _postings if _postings is not None else _apply_overrides(
+        parse_postings(sch.postings), _merged_overrides(occ, override_amounts)
+    )
     tags = [t.strip() for t in sch.tags.split(",") if t.strip()]
     return format_transaction(
         date=date, payee=sch.name, narration=narration, postings=postings,
@@ -94,14 +112,11 @@ def build_preview(session: Session, occurrence_id: int, **transient) -> str:
     postings = parse_postings(sch.postings)
     # Validate the MERGED overrides (stored + transient), mirroring confirm:
     # stale stored keys must error too, not just incoming ones.
-    merged = dict(occ.override_amounts or {})
-    merged.update(transient.get("override_amounts") or {})
-    errors = validate_overrides(postings, merged)
-    effective = _apply_overrides(postings, merged)
-    errors += validate_postings(effective)
-    if errors:
-        raise ValueError("; ".join(errors))
-    return render_occurrence(occ, sch, **transient)
+    merged = _merged_overrides(occ, transient.get("override_amounts"))
+    effective = _validate_effective(postings, merged)
+    return render_occurrence(occ, sch, _postings=effective, **{
+        k: v for k, v in transient.items() if k != "override_amounts"
+    })
 
 
 def confirm_occurrence(
@@ -123,14 +138,8 @@ def confirm_occurrence(
     # overrides merged over any stored ones, then check structural errors and
     # unknown keys.  Raise immediately so nothing is written or persisted.
     postings = parse_postings(sch.postings)
-    merged_amounts = dict(occ.override_amounts or {})
-    if override_amounts:
-        merged_amounts.update(override_amounts)
-    errors = validate_overrides(postings, merged_amounts)
-    effective = _apply_overrides(postings, merged_amounts)
-    errors += validate_postings(effective)
-    if errors:
-        raise ValueError("; ".join(errors))
+    merged_amounts = _merged_overrides(occ, override_amounts)
+    effective = _validate_effective(postings, merged_amounts)
 
     if override_amounts:
         occ.override_amounts = merged_amounts
@@ -139,7 +148,7 @@ def confirm_occurrence(
     if override_narration is not None:
         occ.override_narration = override_narration
 
-    text = render_occurrence(occ, sch)
+    text = render_occurrence(occ, sch, _postings=effective)
     snippet_errors = validate_snippet(config.ledger_main_file, text)
     if snippet_errors:
         raise ValueError("; ".join(snippet_errors))
@@ -176,8 +185,9 @@ def update_schedule(session: Session, schedule_id: int, payload: ScheduleCreate)
     old = {p.id: struct_key(p) for p in parse_postings(sch.postings)}
     new = {p.id: struct_key(p) for p in payload.postings}
 
-    for key, value in payload.model_dump().items():
+    for key, value in payload.model_dump(exclude={"postings"}).items():
         setattr(sch, key, value)
+    sch.postings = dump_postings(payload.postings)
     sch.updated_at = datetime.datetime.now()
 
     pendings = session.exec(
