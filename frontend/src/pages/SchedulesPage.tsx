@@ -128,7 +128,7 @@ export function SchedulesPage() {
         {isDesktop ? (
           <Dialog open={open} onOpenChange={setOpen}>
             <DialogTrigger asChild>{trigger}</DialogTrigger>
-            <DialogContent className="max-h-[90vh] overflow-y-auto">
+            <DialogContent className="max-h-[90vh] overflow-y-auto [scrollbar-gutter:stable]">
               <DialogHeader>
                 <DialogTitle>New schedule</DialogTitle>
                 <DialogDescription>
@@ -144,7 +144,7 @@ export function SchedulesPage() {
             <SheetTrigger asChild>{trigger}</SheetTrigger>
             <SheetContent
               side="bottom"
-              className="max-h-[92vh] overflow-y-auto p-6 pb-8"
+              className="max-h-[92vh] overflow-y-auto p-6 pb-8 [scrollbar-gutter:stable]"
             >
               <SheetHeader className="mb-4 text-left">
                 <SheetTitle>New schedule</SheetTitle>
