@@ -49,7 +49,6 @@ export const api = {
     http<{ ok: boolean }>(`/schedules/${id}`, { method: "DELETE" }),
 
   getInbox: () => http<Occurrence[]>("/inbox"),
-  preview: (id: number) => http<{ text: string }>(`/inbox/${id}/preview`),
   // POST preview renders with transient (unsaved) overrides so the inbox can
   // reflect edited amounts live; an empty body falls back to stored state.
   previewTransient: (id: number, body: PreviewBody) =>

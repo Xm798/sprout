@@ -3,6 +3,7 @@ import { CalendarPlus, Plus, Repeat, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { useDeleteSchedule, useSchedules } from "@/api/hooks";
+import { balanceLeg, headlineLeg } from "@/api/postings";
 import type { Schedule } from "@/api/types";
 import { ScheduleForm } from "@/components/ScheduleForm";
 import { Badge } from "@/components/ui/badge";
@@ -38,8 +39,8 @@ function intervalLabel(s: Schedule) {
 // "Expenses:Sub → Assets:Bank": the headline (first amount-bearing) leg flowing
 // into the auto-balance leg. Falls back to listing accounts when no blank leg.
 function postingsSummary(s: Schedule): string {
-  const amountLeg = s.postings.find((p) => p.amount != null);
-  const blankLeg = s.postings.find((p) => p.amount == null);
+  const amountLeg = headlineLeg(s.postings);
+  const blankLeg = balanceLeg(s.postings);
   if (amountLeg && blankLeg) return `${amountLeg.account} → ${blankLeg.account}`;
   return s.postings
     .map((p) => p.account)

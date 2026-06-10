@@ -3,6 +3,11 @@ import { ArrowRight, Check, ChevronDown, SkipForward } from "lucide-react";
 import { toast } from "sonner";
 
 import { useConfirm, usePreview, useSkip } from "@/api/hooks";
+import {
+  balanceLeg,
+  effectiveHeadlineAmount,
+  headlineLeg,
+} from "@/api/postings";
 import type { ConfirmBody, Occurrence, Schedule } from "@/api/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -46,12 +51,10 @@ export function InboxRow({
 
   const name = schedule?.name ?? `Schedule ${occurrence.schedule_id}`;
   // Headline = first amount-bearing leg; edits in this row tune that leg.
-  const amountLeg = schedule?.postings.find((p) => p.amount != null);
-  const blankLeg = schedule?.postings.find((p) => p.amount == null);
+  const amountLeg = headlineLeg(schedule?.postings);
+  const blankLeg = balanceLeg(schedule?.postings);
   const headlineId = amountLeg?.id;
-  const storedOverride =
-    headlineId != null ? occurrence.override_amounts[headlineId] : undefined;
-  const baseAmount = storedOverride ?? schedule?.headline_amount ?? "";
+  const baseAmount = effectiveHeadlineAmount(occurrence, schedule) ?? "";
   const effectiveDate = occurrence.override_date ?? occurrence.due_date;
   const fieldId = `occ-${occurrence.id}`;
 
@@ -204,7 +207,9 @@ export function InboxRow({
           </div>
 
           {confirm.isError && (
-            <p className="text-sm text-destructive">{String(confirm.error)}</p>
+            <p className="text-sm text-destructive">
+              {errorMessage(confirm.error)}
+            </p>
           )}
         </div>
       )}

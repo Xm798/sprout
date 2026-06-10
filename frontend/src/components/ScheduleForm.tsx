@@ -58,8 +58,7 @@ function toPayload(draft: Draft): ScheduleCreate {
       ? { id: p.id, account, amount: null, currency: null }
       : { id: p.id, account, amount, currency: p.currency };
   });
-  const { postings: _drop, ...rest } = draft;
-  return { ...rest, postings };
+  return { ...draft, postings };
 }
 
 const UNITS: IntervalUnit[] = ["day", "week", "month", "quarter", "year"];
