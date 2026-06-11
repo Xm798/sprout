@@ -21,7 +21,9 @@ def bean_files(session: Session = Depends(get_session)) -> list[str]:
     root = resolve_root(_config(session))
     if not root.is_dir():
         return []
-    return sorted(p.relative_to(root).as_posix() for p in root.rglob("*.bean"))
+    return sorted(
+        p.relative_to(root).as_posix() for p in root.rglob("*.bean") if p.is_file()
+    )
 
 
 @router.get("/accounts")
