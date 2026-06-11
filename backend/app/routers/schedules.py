@@ -4,6 +4,8 @@ from sqlmodel import Session, select
 from app.db import get_session
 from app.models import Schedule, ScheduleBase, ScheduleCreate, ScheduleRead
 from app.postings import parse_postings, validate_postings, headline, dump_postings
+from app.config import AppConfig
+from app.writer import validate_target_file
 from app import services
 
 router = APIRouter(prefix="/schedules")
@@ -20,15 +22,22 @@ def _read(sch: Schedule) -> ScheduleRead:
     )
 
 
-def _validate_or_422(payload: ScheduleCreate) -> None:
+def _validate_or_422(payload: ScheduleCreate, session: Session) -> None:
     errors = validate_postings(payload.postings)
     if errors:
         raise HTTPException(422, "; ".join(errors))
+    cfg = session.get(AppConfig, 1)
+    if cfg is None:
+        raise HTTPException(500, "config not initialized")
+    try:
+        payload.target_file = validate_target_file(cfg, payload.target_file)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
 
 
 @router.post("", response_model=ScheduleRead)
 def create(payload: ScheduleCreate, session: Session = Depends(get_session)) -> ScheduleRead:
-    _validate_or_422(payload)
+    _validate_or_422(payload, session)
     sch = Schedule(**payload.model_dump(exclude={"postings"}), postings=dump_postings(payload.postings))
     session.add(sch)
     session.commit()
@@ -51,7 +60,7 @@ def get_one(schedule_id: int, session: Session = Depends(get_session)) -> Schedu
 
 @router.put("/{schedule_id}", response_model=ScheduleRead)
 def update(schedule_id: int, payload: ScheduleCreate, session: Session = Depends(get_session)) -> ScheduleRead:
-    _validate_or_422(payload)
+    _validate_or_422(payload, session)
     try:
         sch = services.update_schedule(session, schedule_id, payload)
     except LookupError as exc:

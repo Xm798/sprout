@@ -298,6 +298,30 @@ def test_confirm_orphan_occurrence_404(client):
 
 # ── schedule edited between preview and confirm ─────────────────────────────────
 
+def test_create_schedule_with_target_file(client):
+    r = client.post("/api/schedules", json=_new_schedule_payload(target_file="subs/spotify.bean"))
+    assert r.status_code == 200, r.text
+    assert r.json()["target_file"] == "subs/spotify.bean"
+    # round-trips through list and update
+    sid = r.json()["id"]
+    assert client.get(f"/api/schedules/{sid}").json()["target_file"] == "subs/spotify.bean"
+    r2 = client.put(f"/api/schedules/{sid}", json=_new_schedule_payload(target_file="other.bean"))
+    assert r2.status_code == 200, r2.text
+    assert r2.json()["target_file"] == "other.bean"
+
+
+def test_create_schedule_blank_target_file_normalizes_to_null(client):
+    r = client.post("/api/schedules", json=_new_schedule_payload(target_file="  "))
+    assert r.status_code == 200, r.text
+    assert r.json()["target_file"] is None
+
+
+@pytest.mark.parametrize("bad", ["/abs/x.bean", "../up.bean", "x.txt", "a\\b.bean"])
+def test_create_schedule_rejects_bad_target_file(client, bad):
+    r = client.post("/api/schedules", json=_new_schedule_payload(target_file=bad))
+    assert r.status_code == 422
+
+
 def test_confirm_rejects_override_for_leg_renamed_after_preview(client, tmp_path):
     """If the schedule's amount-leg posting id changes between preview and confirm,
     confirming with the now-stale id must 422 (occurrence stays pending, ledger
