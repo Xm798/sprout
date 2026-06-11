@@ -36,6 +36,8 @@ def validate_target_file(config: AppConfig, value: str | None) -> str | None:
         return None
     if "\\" in value:
         raise ValueError("target_file must use forward slashes")
+    if '"' in value or any(ord(c) < 32 or ord(c) == 127 for c in value):
+        raise ValueError("target_file must not contain quotes or control characters")
     p = Path(value)
     if p.is_absolute():
         raise ValueError("target_file must be a relative path")
@@ -72,6 +74,8 @@ def ensure_included(config: AppConfig, target: Path) -> None:
     validating it (validate_target_file) beforehand.
     """
     target = Path(target)
+    if target.is_dir():
+        raise ValueError("target_file is a directory")
     target.parent.mkdir(parents=True, exist_ok=True)
     if not target.exists():
         target.touch()

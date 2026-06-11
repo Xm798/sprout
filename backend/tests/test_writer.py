@@ -84,6 +84,8 @@ def test_validate_target_file_normalizes_blank_to_none(tmp_path):
     "rent.txt",           # wrong extension
     "rent",               # no extension
     "a\\b.bean",          # backslash
+    'we"ird.bean',        # double quote
+    "we\nird.bean",       # control character
 ])
 def test_validate_target_file_rejects(tmp_path, bad):
     cfg = _cfg(tmp_path)
@@ -148,6 +150,15 @@ def test_ensure_included_never_self_includes_main(tmp_path):
     cfg = _cfg(tmp_path)
     main = _main_ledger(tmp_path)
     ensure_included(cfg, main)
+    assert "include" not in main.read_text()
+
+
+def test_ensure_included_rejects_directory_target(tmp_path):
+    cfg = _cfg(tmp_path)
+    main = _main_ledger(tmp_path)
+    (tmp_path / "rent.bean").mkdir()
+    with pytest.raises(ValueError):
+        ensure_included(cfg, tmp_path / "rent.bean")
     assert "include" not in main.read_text()
 
 
