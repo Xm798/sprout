@@ -63,6 +63,66 @@ def append_transaction(path: Path, text: str) -> None:
     os.replace(tmp, path)
 
 
+def replace_file(path: Path, content: bytes) -> None:
+    """Atomically replace ``path``'s content byte-for-byte (tmp + os.replace).
+    Also the restore half of verify-restore flows: writing back a snapshot
+    taken with ``read_bytes`` is guaranteed byte-identical."""
+    path = Path(path)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_bytes(content)
+    os.replace(tmp, path)
+
+
+def _block_lines(path: Path, lineno: int) -> tuple[list[bytes], int, int]:
+    """Split ``path`` into lines and return ``(lines, start, end)`` for the
+    entry block whose header sits at ``lineno`` (1-based): the header plus
+    every following blank or indented line — tabs count as indentation.
+    Byte-level on purpose: ``str.splitlines`` also breaks on unicode line
+    separators that may legally appear inside quoted strings."""
+    lines = Path(path).read_bytes().splitlines(keepends=True)
+    start = lineno - 1
+    if not 0 <= start < len(lines):
+        raise ValueError(f"line {lineno} is outside {path}")
+    end = start + 1
+    while end < len(lines) and (not lines[end].strip() or lines[end][:1] in (b" ", b"\t")):
+        end += 1
+    return lines, start, end
+
+
+def _block_text(lines: list[bytes], start: int, end: int) -> str:
+    block = b"".join(lines[start:end])
+    return (block.rstrip(b"\r\n") + b"\n").decode("utf-8")
+
+
+def read_block(path: Path, lineno: int) -> str:
+    """The entry block whose header sits at ``lineno``, exactly as it exists
+    on disk (trailing blank lines trimmed)."""
+    lines, start, end = _block_lines(path, lineno)
+    return _block_text(lines, start, end)
+
+
+def delete_block(path: Path, lineno: int) -> str:
+    """Remove the entry block whose header sits at ``lineno`` (1-based).
+
+    Pure line surgery: the block and its surrounding blank separation are
+    removed, collapsing to a single blank line between the neighbours (none
+    at the file edges); nothing outside the block is reformatted. Atomic
+    tmp+replace write; returns the removed block text.
+
+    Known limitation: a multi-line quoted string (legal beancount) puts its
+    continuation text at column 0, ending the block early here — callers must
+    verify the ledger still loads afterwards and restore on failure.
+    """
+    lines, start, end = _block_lines(path, lineno)
+    pre = start
+    while pre > 0 and not lines[pre - 1].strip():
+        pre -= 1
+    head, tail = lines[:pre], lines[end:]
+    separator = b"\n" if head and tail else b""
+    replace_file(path, b"".join(head) + separator + b"".join(tail))
+    return _block_text(lines, start, end)
+
+
 def ensure_included(config: AppConfig, target: Path) -> None:
     """Make `target` loadable from the main ledger.
 
