@@ -1,8 +1,14 @@
 import datetime
+import logging
 from decimal import Decimal
+from pathlib import Path
 from typing import Optional
 
+import beanfmt
+
 from app.postings import Posting
+
+logger = logging.getLogger(__name__)
 
 
 def _fmt_amount(amount: Decimal) -> str:
@@ -51,3 +57,19 @@ def format_transaction(
     for p in postings:
         lines.append(_render_posting(p))
     return "\n".join(lines) + "\n"
+
+
+def apply_beanfmt(text: str, workspace: Optional[Path]) -> str:
+    """Best-effort beanfmt pass over rendered transaction text. Project config
+    (.beanfmt.toml / beanfmt.toml) is discovered by searching upward from the
+    ledger workspace; without one, beanfmt defaults apply. Formatting is
+    cosmetic and must never block a preview or write, so any failure (invalid
+    config TOML, unparsable text) falls back to the input unchanged."""
+    try:
+        options = None
+        if workspace is not None and workspace.is_dir():
+            options = beanfmt.load_project_config(str(workspace))
+        return beanfmt.format(text, options=options)
+    except Exception as exc:
+        logger.warning("beanfmt formatting skipped: %s", exc)
+        return text

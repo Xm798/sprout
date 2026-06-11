@@ -1,4 +1,5 @@
 import datetime
+import re
 from pathlib import Path
 
 import pytest
@@ -63,10 +64,11 @@ def test_preview_renders_expected_text(session, config, today):
     sch = _make_schedule(session)
     services.materialize_occurrences(session, config, today)
     occ = _first_occ(session, sch)
-    text = services.build_preview(session, occ.id)
+    text = services.build_preview(session, config, occ.id)
     assert '"Spotify" "sub" #sprout' in text
     assert f'sprout-id: "{occ.sprout_id}"' in text
-    assert "Expenses:Subscription  15.00 USD" in text
+    # beanfmt aligns the amount column, so match whitespace flexibly
+    assert re.search(r"Expenses:Subscription\s+15\.00 USD", text)
     assert "Assets:CreditCard\n" in text
 
 
@@ -77,8 +79,8 @@ def test_preview_applies_per_leg_override(session, config, today):
     occ.override_amounts = {"main": "9.99"}
     session.add(occ)
     session.commit()
-    text = services.build_preview(session, occ.id)
-    assert "Expenses:Subscription  9.99 USD" in text
+    text = services.build_preview(session, config, occ.id)
+    assert re.search(r"Expenses:Subscription\s+9\.99 USD", text)
 
 
 def test_confirm_with_override_amounts(session, config, today):
@@ -196,7 +198,7 @@ def test_tags_with_spaces_render_cleanly(session, config, today):
     session.refresh(sch)
     services.materialize_occurrences(session, config, today)
     occ = _first_occ(session, sch)
-    text = services.build_preview(session, occ.id)
+    text = services.build_preview(session, config, occ.id)
     assert "#a #b" in text
     assert "# b" not in text
 
@@ -288,7 +290,7 @@ def test_preview_unknown_override_key_raises(session, config, today):
     occ = _first_occ(session, sch)
 
     with pytest.raises(ValueError, match="bogus"):
-        services.build_preview(session, occ.id, override_amounts={"bogus": "99.00"})
+        services.build_preview(session, config, occ.id, override_amounts={"bogus": "99.00"})
 
 
 def test_preview_stale_stored_override_key_raises(session, config, today):
@@ -303,7 +305,7 @@ def test_preview_stale_stored_override_key_raises(session, config, today):
     session.commit()
 
     with pytest.raises(ValueError, match="stale"):
-        services.build_preview(session, occ.id)
+        services.build_preview(session, config, occ.id)
 
 
 def test_preview_malformed_amount_friendly_message(session, config, today):
@@ -313,7 +315,7 @@ def test_preview_malformed_amount_friendly_message(session, config, today):
     occ = _first_occ(session, sch)
 
     with pytest.raises(ValueError, match="is not a number"):
-        services.build_preview(session, occ.id, override_amounts={"main": "abc"})
+        services.build_preview(session, config, occ.id, override_amounts={"main": "abc"})
 
 
 # ── override pruning covers skipped occurrences ───────────────────────────────
@@ -445,6 +447,32 @@ def test_confirm_without_target_file_uses_global_strategy(session, tmp_ledger_co
     session.refresh(occ)
     assert occ.written_path == str(Path(tmp_ledger_config.ledger_root) / "sprout.bean")
     assert Path(tmp_ledger_config.ledger_main_file).read_text() == before  # main untouched
+
+
+# ── beanfmt formatting ─────────────────────────────────────────────────────────
+
+def test_confirm_writes_beanfmt_formatted_text(session, tmp_ledger_config, today):
+    """Written transactions are formatted with beanfmt, honoring the workspace
+    .beanfmt.toml next to the main ledger file."""
+    (Path(tmp_ledger_config.ledger_main_file).parent / ".beanfmt.toml").write_text("indent = 6\n")
+    sch = _make_schedule(session)
+    services.materialize_occurrences(session, tmp_ledger_config, today)
+    occ = _first_occ(session, sch)
+
+    services.confirm_occurrence(session, tmp_ledger_config, occ.id)
+
+    written = Path(occ.written_path).read_text()
+    assert "      Expenses:Subscription" in written  # 6-space indent from config
+    assert f'sprout-id: "{occ.sprout_id}"' in written
+
+
+def test_preview_matches_beanfmt_workspace_config(session, tmp_ledger_config, today):
+    (Path(tmp_ledger_config.ledger_main_file).parent / ".beanfmt.toml").write_text("indent = 6\n")
+    sch = _make_schedule(session)
+    services.materialize_occurrences(session, tmp_ledger_config, today)
+    occ = _first_occ(session, sch)
+    text = services.build_preview(session, tmp_ledger_config, occ.id)
+    assert "      Expenses:Subscription" in text
 
 
 def test_confirm_rejects_target_file_escaping_root(session, tmp_ledger_config, today):
