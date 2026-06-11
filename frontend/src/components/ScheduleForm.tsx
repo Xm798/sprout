@@ -28,7 +28,10 @@ interface DraftPosting {
   currency: string;
 }
 
-type Draft = Omit<ScheduleCreate, "postings"> & { postings: DraftPosting[] };
+type Draft = Omit<ScheduleCreate, "postings" | "target_file"> & {
+  postings: DraftPosting[];
+  target_file: string;
+};
 
 function newLeg(currency = "USD"): DraftPosting {
   return { id: crypto.randomUUID(), account: "", amount: "", currency };
@@ -46,7 +49,7 @@ function emptyDraft(): Draft {
     max_count: null,
     tags: "sprout",
     status: "active",
-    target_file: null,
+    target_file: "",
     postings: [newLeg("USD"), newLeg("")],
   };
 }
@@ -59,8 +62,7 @@ function toPayload(draft: Draft): ScheduleCreate {
       ? { id: p.id, account, amount: null, currency: null }
       : { id: p.id, account, amount, currency: p.currency };
   });
-  const target_file = (draft.target_file ?? "").trim() || null;
-  return { ...draft, target_file, postings };
+  return { ...draft, target_file: draft.target_file.trim() || null, postings };
 }
 
 const UNITS: IntervalUnit[] = ["day", "week", "month", "quarter", "year"];
@@ -75,7 +77,7 @@ export function ScheduleForm({ onCreated }: { onCreated?: () => void }) {
   const accountOptions = accounts.data ?? [];
   const currencyOptions = currencies.data ?? [];
   const beanFileOptions = beanFiles.data ?? [];
-  const targetFileValue = (draft.target_file ?? "").trim();
+  const targetFileValue = draft.target_file.trim();
   const isNewFile =
     beanFiles.isSuccess &&
     targetFileValue !== "" &&
@@ -255,8 +257,8 @@ export function ScheduleForm({ onCreated }: { onCreated?: () => void }) {
         <Combobox
           id="sf-target-file"
           aria-label="Target file"
-          value={draft.target_file ?? ""}
-          onChange={(v) => set("target_file", v === "" ? null : v)}
+          value={draft.target_file}
+          onChange={(v) => set("target_file", v)}
           suggestions={beanFileOptions}
           placeholder="Default (global write mode)"
         />
