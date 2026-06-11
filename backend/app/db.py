@@ -161,7 +161,9 @@ def migrate_legacy_schema(engine) -> None:
     the occurrence backfill reads the schedule's new posting ids.
 
     Guard condition is OLD column presence, not absence of new column, so a
-    half-migrated DB (new column added but old not yet dropped) resumes cleanly."""
+    half-migrated DB (new column added but old not yet dropped) resumes cleanly.
+    Newer columns (e.g. schedule.target_file) are added idempotently in a
+    separate step that runs unconditionally on every startup."""
     sched_cols = _columns(engine, "schedule")
     if sched_cols and "from_account" in sched_cols:
         _migrate_schedule(engine)

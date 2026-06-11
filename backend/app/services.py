@@ -144,15 +144,16 @@ def confirm_occurrence(
     if override_narration is not None:
         occ.override_narration = override_narration
 
+    # Re-validate cheaply at write time: a symlink created after the schedule
+    # was saved must not let the write escape the ledger root.
+    tf = validate_target_file(config, sch.target_file)
+
     text = render_occurrence(occ, sch, effective_postings=effective)
     snippet_errors = validate_snippet(config.ledger_main_file, text)
     if snippet_errors:
         raise ValueError("; ".join(snippet_errors))
 
     eff_date, _narration = _effective_meta(occ, sch)
-    # Re-validate cheaply at write time: a symlink created after the schedule
-    # was saved must not let the write escape the ledger root.
-    tf = validate_target_file(config, sch.target_file)
     path = target_path(config, eff_date, target_file=tf)
     if tf:
         ensure_included(config, path)
