@@ -9,7 +9,7 @@ from app.main import app
 from app.db import get_session
 from app.config import AppConfig
 from app.models import Occurrence
-from tests.conftest import make_test_engine
+from tests.conftest import make_test_engine, new_schedule_payload
 
 
 @pytest.fixture
@@ -35,32 +35,15 @@ def client(tmp_path):
         SQLModel.metadata.drop_all(engine)
 
 
-def _new_schedule_payload(**over):
-    body = {
-        "name": "Spotify", "narration": "sub",
-        "postings": [
-            {"id": "main", "account": "Expenses:Subscription", "amount": "15.00",
-             "currency": "USD", "cost": None, "price": None},
-            {"id": "bal", "account": "Assets:CreditCard", "amount": None,
-             "currency": None, "cost": None, "price": None},
-        ],
-        "interval_unit": "month", "interval_count": 1,
-        "anchor_date": "2026-01-15", "max_count": 6, "tags": "sprout",
-        "status": "active",
-    }
-    body.update(over)
-    return body
-
-
 def test_create_and_list_schedules(client):
-    r = client.post("/api/schedules", json=_new_schedule_payload())
+    r = client.post("/api/schedules", json=new_schedule_payload())
     assert r.status_code == 200, r.text
     sid = r.json()["id"]
     assert client.get("/api/schedules").json()[0]["id"] == sid
 
 
 def test_inbox_lists_pending(client):
-    client.post("/api/schedules", json=_new_schedule_payload())
+    client.post("/api/schedules", json=new_schedule_payload())
     r = client.get("/api/inbox")
     assert r.status_code == 200
     items = r.json()
@@ -69,7 +52,7 @@ def test_inbox_lists_pending(client):
 
 
 def test_preview_then_confirm(client):
-    client.post("/api/schedules", json=_new_schedule_payload())
+    client.post("/api/schedules", json=new_schedule_payload())
     occ_id = client.get("/api/inbox").json()[0]["id"]
     prev = client.get(f"/api/inbox/{occ_id}/preview")
     assert "Expenses:Subscription" in prev.json()["text"]
@@ -79,7 +62,7 @@ def test_preview_then_confirm(client):
 
 
 def test_skip(client):
-    client.post("/api/schedules", json=_new_schedule_payload())
+    client.post("/api/schedules", json=new_schedule_payload())
     occ_id = client.get("/api/inbox").json()[0]["id"]
     r = client.post(f"/api/inbox/{occ_id}/skip")
     assert r.json()["status"] == "skipped"
@@ -110,7 +93,7 @@ def test_skip_missing_occurrence_404(client):
 
 
 def test_create_schedule_returns_headline(client):
-    r = client.post("/api/schedules", json=_new_schedule_payload())
+    r = client.post("/api/schedules", json=new_schedule_payload())
     assert r.status_code == 200, r.text
     data = r.json()
     assert data["headline_amount"] == "15.00"
@@ -119,7 +102,7 @@ def test_create_schedule_returns_headline(client):
 
 
 def test_create_rejects_two_blank_legs(client):
-    bad = _new_schedule_payload(postings=[
+    bad = new_schedule_payload(postings=[
         {"id": "a", "account": "Assets:One", "amount": None, "currency": None,
          "cost": None, "price": None},
         {"id": "b", "account": "Assets:Two", "amount": None, "currency": None,
@@ -129,7 +112,7 @@ def test_create_rejects_two_blank_legs(client):
 
 
 def test_post_preview_reflects_transient_override(client):
-    client.post("/api/schedules", json=_new_schedule_payload())
+    client.post("/api/schedules", json=new_schedule_payload())
     occ = client.get("/api/inbox").json()[0]
     r = client.post(
         f"/api/inbox/{occ['id']}/preview",
@@ -140,8 +123,8 @@ def test_post_preview_reflects_transient_override(client):
 
 
 def test_update_schedule_returns_updated_headline(client):
-    sid = client.post("/api/schedules", json=_new_schedule_payload()).json()["id"]
-    updated = _new_schedule_payload()
+    sid = client.post("/api/schedules", json=new_schedule_payload()).json()["id"]
+    updated = new_schedule_payload()
     updated["postings"][0]["amount"] = "42.00"
     r = client.put(f"/api/schedules/{sid}", json=updated)
     assert r.status_code == 200, r.text
@@ -149,11 +132,11 @@ def test_update_schedule_returns_updated_headline(client):
 
 
 def test_update_missing_schedule_404(client):
-    assert client.put("/api/schedules/99999", json=_new_schedule_payload()).status_code == 404
+    assert client.put("/api/schedules/99999", json=new_schedule_payload()).status_code == 404
 
 
 def _inbox_occ_id(client) -> int:
-    client.post("/api/schedules", json=_new_schedule_payload())
+    client.post("/api/schedules", json=new_schedule_payload())
     return client.get("/api/inbox").json()[0]["id"]
 
 
@@ -173,7 +156,7 @@ def test_post_preview_malformed_amount_422(client):
 
 def test_confirm_unknown_override_key_422(client):
     """Unknown posting id in override_amounts must 422, keep occ pending, not persist bogus key."""
-    client.post("/api/schedules", json=_new_schedule_payload())
+    client.post("/api/schedules", json=new_schedule_payload())
     occ = client.get("/api/inbox").json()[0]
     occ_id = occ["id"]
     r = client.post(f"/api/inbox/{occ_id}/confirm", json={"override_amounts": {"bogus": "99.00"}})
@@ -235,7 +218,7 @@ def test_delete_schedule_removes_occurrences(client):
     and from the DB (all statuses, not just pending)."""
     from sqlmodel import select
     from app.models import Occurrence
-    client.post("/api/schedules", json=_new_schedule_payload())
+    client.post("/api/schedules", json=new_schedule_payload())
     inbox_before = client.get("/api/inbox").json()
     assert len(inbox_before) >= 1
     sid = inbox_before[0]["schedule_id"]
@@ -302,7 +285,7 @@ def test_confirm_rejects_override_for_leg_renamed_after_preview(client, tmp_path
     """If the schedule's amount-leg posting id changes between preview and confirm,
     confirming with the now-stale id must 422 (occurrence stays pending, ledger
     untouched), while confirming with the new id succeeds and writes the override."""
-    sid = client.post("/api/schedules", json=_new_schedule_payload()).json()["id"]
+    sid = client.post("/api/schedules", json=new_schedule_payload()).json()["id"]
     occ_id = client.get("/api/inbox").json()[0]["id"]
     ledger = tmp_path / "sprout.bean"
 
@@ -314,7 +297,7 @@ def test_confirm_rejects_override_for_leg_renamed_after_preview(client, tmp_path
     assert "12.34" in prev.json()["text"]
 
     # Rename the amount leg's posting id, mirroring a user editing the schedule.
-    edited = _new_schedule_payload()
+    edited = new_schedule_payload()
     edited["postings"][0]["id"] = "main2"
     assert client.put(f"/api/schedules/{sid}", json=edited).status_code == 200
 

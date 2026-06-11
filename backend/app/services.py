@@ -8,8 +8,12 @@ from app.models import Schedule, Occurrence, ScheduleCreate
 from app.due_engine import compute_due_dates
 from app.bean_format import format_transaction
 from app.postings import Posting, parse_postings, dump_postings, validate_postings, validate_overrides, struct_key
-from app.ledger import validate_snippet
+from app.ledger import validate_snippet, load_sprout_ids
 from app.writer import target_path, append_transaction
+
+
+class ConflictError(RuntimeError):
+    """State conflict (e.g. re-adding a transaction that is still present)."""
 
 
 def materialize_occurrences(session: Session, config: AppConfig, today: datetime.date) -> int:
@@ -167,6 +171,77 @@ def skip_occurrence(session: Session, occurrence_id: int) -> Occurrence:
     if occ is None:
         raise LookupError(f"occurrence {occurrence_id} not found")
     occ.status = "skipped"
+    session.add(occ)
+    session.commit()
+    session.refresh(occ)
+    return occ
+
+
+def list_history(session: Session) -> list[Occurrence]:
+    """Confirmed and skipped occurrences, newest due date first. Ordering avoids
+    confirmed_at, which is NULL for skipped rows and sorts differently across
+    SQLite and Postgres."""
+    return list(session.exec(
+        select(Occurrence)
+        .where(Occurrence.status != "pending")
+        .order_by(Occurrence.due_date.desc(), Occurrence.id.desc())
+    ).all())
+
+
+def find_missing_occurrences(session: Session, config: AppConfig) -> list[int]:
+    """IDs of confirmed occurrences whose sprout-id is absent from the ledger's
+    include tree — i.e. written transactions a manual edit deleted or orphaned."""
+    present = load_sprout_ids(config.ledger_main_file)
+    confirmed = session.exec(
+        select(Occurrence).where(Occurrence.status == "confirmed")
+    ).all()
+    return [o.id for o in confirmed if o.sprout_id and o.sprout_id not in present]
+
+
+def readd_occurrence(session: Session, config: AppConfig, occurrence_id: int) -> Occurrence:
+    """Re-append a confirmed occurrence whose written transaction vanished from
+    the ledger. Renders from current schedule + stored overrides (the original
+    text is not stored), same as confirm."""
+    occ = session.get(Occurrence, occurrence_id)
+    if occ is None:
+        raise LookupError(f"occurrence {occurrence_id} not found")
+    if occ.status != "confirmed":
+        raise ConflictError(f"occurrence {occurrence_id} is {occ.status}, not confirmed")
+    if not occ.sprout_id:
+        raise ValueError(f"occurrence {occurrence_id} has no sprout-id; cannot reconcile")
+    sch = session.get(Schedule, occ.schedule_id)
+    if sch is None:
+        raise LookupError(f"schedule {occ.schedule_id} not found")
+
+    if occ.sprout_id in load_sprout_ids(config.ledger_main_file):
+        raise ConflictError(
+            f"transaction {occ.sprout_id} is still present in the ledger"
+        )
+
+    postings = parse_postings(sch.postings)
+    effective = _validate_effective(postings, _merged_overrides(occ, None))
+    text = render_occurrence(occ, sch, effective_postings=effective)
+
+    eff_date, _narration = _effective_meta(occ, sch)
+    path = target_path(config, eff_date)
+    # The include-tree scan above cannot see files the main ledger doesn't
+    # include; a direct check on the target file prevents double-appending when
+    # the user's `include` line is missing.
+    # Match the exact metadata line bean_format writes — a bare substring test
+    # could hit comments or ids sharing a prefix (sch1- vs sch11-).
+    if path.exists() and f'sprout-id: "{occ.sprout_id}"' in path.read_text():
+        raise ConflictError(
+            f"transaction {occ.sprout_id} already exists in {path} but is not "
+            "reachable from the main ledger — check your include directives"
+        )
+
+    snippet_errors = validate_snippet(config.ledger_main_file, text)
+    if snippet_errors:
+        raise ValueError("; ".join(snippet_errors))
+    append_transaction(path, text)
+
+    occ.written_path = str(path)
+    occ.confirmed_at = datetime.datetime.now()
     session.add(occ)
     session.commit()
     session.refresh(occ)

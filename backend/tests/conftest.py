@@ -33,6 +33,24 @@ def session():
         SQLModel.metadata.drop_all(engine)
 
 
+def new_schedule_payload(**over):
+    """Canonical two-leg schedule body for API tests; override fields via kwargs."""
+    body = {
+        "name": "Spotify", "narration": "sub",
+        "postings": [
+            {"id": "main", "account": "Expenses:Subscription", "amount": "15.00",
+             "currency": "USD", "cost": None, "price": None},
+            {"id": "bal", "account": "Assets:CreditCard", "amount": None,
+             "currency": None, "cost": None, "price": None},
+        ],
+        "interval_unit": "month", "interval_count": 1,
+        "anchor_date": "2026-01-15", "max_count": 6, "tags": "sprout",
+        "status": "active",
+    }
+    body.update(over)
+    return body
+
+
 @pytest.fixture
 def demo_ledger() -> str:
     return str(Path(__file__).parent / "fixtures" / "demo.bean")

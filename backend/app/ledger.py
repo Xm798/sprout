@@ -47,6 +47,25 @@ def load_currencies(path: str) -> list[str]:
     return operating + sorted(extra)
 
 
+def load_sprout_ids(main_path: str) -> set[str]:
+    """Set of ``sprout-id`` metadata values on transactions across the include tree.
+
+    Raises FileNotFoundError when the main file is unset or missing so callers can
+    distinguish "ledger not configured" from "id absent". Load errors do not abort
+    the scan — beancount returns partial entries alongside errors.
+    """
+    if not main_path or not os.path.exists(main_path):
+        raise FileNotFoundError(main_path or "ledger main file not configured")
+    entries, _errors, _options = _load(main_path)
+    ids: set[str] = set()
+    for e in entries:
+        if isinstance(e, data.Transaction):
+            sid = e.meta.get("sprout-id")
+            if sid:
+                ids.add(sid)
+    return ids
+
+
 def _error_messages(errors) -> list[str]:
     return [getattr(e, "message", str(e)) for e in errors]
 
