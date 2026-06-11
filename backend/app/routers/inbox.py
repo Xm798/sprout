@@ -69,6 +69,9 @@ def confirm(occurrence_id: int, body: ConfirmBody, session: Session = Depends(ge
         )
     except LookupError as exc:
         raise HTTPException(404, str(exc))
+    except services.ConflictError as exc:
+        # Duplicate-write guard: the target file already holds this sprout-id.
+        raise HTTPException(409, str(exc))
     except (ValueError, ArithmeticError) as exc:
         raise HTTPException(422, str(exc))
 
