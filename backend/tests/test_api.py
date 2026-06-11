@@ -322,6 +322,20 @@ def test_create_schedule_rejects_bad_target_file(client, bad):
     assert r.status_code == 422
 
 
+def test_bean_files_lists_nested_relative_paths(client, tmp_path):
+    (tmp_path / "rent.bean").write_text("")
+    (tmp_path / "loans").mkdir()
+    (tmp_path / "loans" / "car.bean").write_text("")
+    (tmp_path / "notes.txt").write_text("")
+    r = client.get("/api/bean-files")
+    assert r.status_code == 200
+    files = r.json()
+    assert "rent.bean" in files
+    assert "loans/car.bean" in files
+    assert "notes.txt" not in files
+    assert files == sorted(files)
+
+
 def test_confirm_rejects_override_for_leg_renamed_after_preview(client, tmp_path):
     """If the schedule's amount-leg posting id changes between preview and confirm,
     confirming with the now-stale id must 422 (occurrence stays pending, ledger
