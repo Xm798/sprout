@@ -8,6 +8,7 @@ export const qk = {
   accounts: ["accounts"] as const,
   currencies: ["currencies"] as const,
   config: ["config"] as const,
+  beanFiles: ["bean-files"] as const,
   preview: (id: number, body: PreviewBody) => ["preview", id, body] as const,
 };
 
@@ -65,6 +66,10 @@ export function useSkip() {
 
 export function useAccounts() {
   return useQuery({ queryKey: qk.accounts, queryFn: api.accounts });
+}
+
+export function useBeanFiles() {
+  return useQuery({ queryKey: qk.beanFiles, queryFn: api.beanFiles });
 }
 
 export function useCurrencies() {
