@@ -1,6 +1,7 @@
 import type {
   AppConfig,
   ConfirmBody,
+  HistoryCheck,
   Occurrence,
   PreviewBody,
   Schedule,
@@ -62,6 +63,12 @@ export const api = {
       body: JSON.stringify(body),
     }),
   skip: (id: number) => http<Occurrence>(`/inbox/${id}/skip`, { method: "POST" }),
+
+  getHistory: () => http<Occurrence[]>("/history"),
+  // Reconcile scan: which confirmed occurrences vanished from the ledger.
+  checkHistory: () => http<HistoryCheck>("/history/check"),
+  readd: (id: number) =>
+    http<Occurrence>(`/history/${id}/readd`, { method: "POST" }),
 
   accounts: () => http<string[]>("/accounts"),
   currencies: () => http<string[]>("/currencies"),

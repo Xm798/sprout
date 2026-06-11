@@ -8,6 +8,7 @@ Define recurring payments (subscriptions, loan repayments, rent), review what's 
 - Schedules: create recurring payments (interval, anchor date, end conditions).
 - Inbox: review due occurrences, edit amount/date/narration inline, see a live `.bean` preview, confirm or skip.
 - Real writes: validated against your ledger, appended atomically, stamped with a `sprout-id` for idempotency.
+- History: browse confirmed/skipped occurrences, detect written transactions that vanished from the ledger (manual edits), and re-add them.
 - Settings: configure your ledger path and write mode.
 
 ## Run with Docker (recommended)

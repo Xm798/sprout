@@ -1,4 +1,4 @@
-import { Inbox, Repeat, Settings } from "lucide-react";
+import { History, Inbox, Repeat, Settings } from "lucide-react";
 import { NavLink } from "react-router-dom";
 import type { ReactNode } from "react";
 
@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils";
 
 const NAV = [
   { to: "/", label: "Inbox", icon: Inbox, end: true },
+  { to: "/history", label: "History", icon: History, end: false },
   { to: "/schedules", label: "Schedules", icon: Repeat, end: false },
   { to: "/settings", label: "Settings", icon: Settings, end: false },
 ];
@@ -40,7 +41,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           {/* One nav: a horizontal bar on desktop, a fixed tab bar on mobile. */}
           <nav
             className={cn(
-              "fixed inset-x-0 bottom-0 z-40 grid grid-cols-3 border-t border-border/60 bg-background/90 px-2 pb-safe pt-1.5 backdrop-blur-xl",
+              "fixed inset-x-0 bottom-0 z-40 grid grid-cols-4 border-t border-border/60 bg-background/90 px-2 pb-safe pt-1.5 backdrop-blur-xl",
               "md:static md:flex md:items-center md:gap-1 md:border-0 md:bg-transparent md:p-0 md:backdrop-blur-none"
             )}
           >

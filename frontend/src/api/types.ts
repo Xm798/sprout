@@ -55,6 +55,10 @@ export interface Occurrence {
   confirmed_at?: string | null;
 }
 
+export interface HistoryCheck {
+  missing: number[]; // ids of confirmed occurrences absent from the ledger
+}
+
 export interface ConfirmBody {
   override_amounts?: Record<string, string>;
   override_date?: string | null;

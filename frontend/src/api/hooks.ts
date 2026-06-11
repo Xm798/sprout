@@ -5,6 +5,8 @@ import type { AppConfig, ConfirmBody, PreviewBody, ScheduleCreate } from "./type
 export const qk = {
   schedules: ["schedules"] as const,
   inbox: ["inbox"] as const,
+  history: ["history"] as const,
+  historyCheck: ["history", "check"] as const,
   accounts: ["accounts"] as const,
   currencies: ["currencies"] as const,
   config: ["config"] as const,
@@ -51,7 +53,11 @@ export function useConfirm() {
   return useMutation({
     mutationFn: ({ id, body }: { id: number; body: ConfirmBody }) =>
       api.confirm(id, body),
-    onSuccess: () => qc.invalidateQueries({ queryKey: qk.inbox }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: qk.inbox });
+      // A confirmed occurrence enters the history list.
+      qc.invalidateQueries({ queryKey: qk.history });
+    },
   });
 }
 
@@ -59,7 +65,37 @@ export function useSkip() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: number) => api.skip(id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: qk.inbox }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: qk.inbox });
+      // A skipped occurrence enters the history list.
+      qc.invalidateQueries({ queryKey: qk.history });
+    },
+  });
+}
+
+export function useHistory() {
+  return useQuery({ queryKey: qk.history, queryFn: api.getHistory });
+}
+
+export function useHistoryCheck() {
+  // 422 (ledger not configured/missing) is deterministic — don't retry it.
+  return useQuery({
+    queryKey: qk.historyCheck,
+    queryFn: api.checkHistory,
+    retry: false,
+  });
+}
+
+export function useReadd() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => api.readd(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: qk.history });
+      qc.invalidateQueries({ queryKey: qk.historyCheck });
+    },
+    // A 409 means the ledger changed under us — refresh the check too.
+    onError: () => qc.invalidateQueries({ queryKey: qk.historyCheck }),
   });
 }
 

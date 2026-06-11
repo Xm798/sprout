@@ -16,17 +16,7 @@ import { DatePicker } from "@/components/ui/date-picker";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
-import { cn, errorMessage, formatAmount } from "@/lib/utils";
-
-function formatDate(value: string) {
-  const d = new Date(`${value}T00:00:00`);
-  if (Number.isNaN(d.getTime())) return value;
-  return d.toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
-}
+import { cn, errorMessage, formatAmount, formatDate } from "@/lib/utils";
 
 function leaf(account?: string) {
   if (!account) return "—";
