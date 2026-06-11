@@ -105,6 +105,21 @@ test("submits the typed target_file and hints when it is a new file", async () =
   expect(arg.target_file).toBe("housing.bean");
 });
 
+test("shows no new-file hint for an existing bean file", async () => {
+  const user = userEvent.setup();
+  renderWithProviders(<ScheduleForm />);
+
+  // Type a prefix and pick the existing file from the suggestion list — the
+  // option appearing proves the bean-files query has resolved.
+  await user.type(screen.getByLabelText(/target file/i), "rent");
+  await user.click(await screen.findByRole("option", { name: /rent\.bean/i }));
+
+  expect(screen.getByLabelText(/target file/i)).toHaveValue("rent.bean");
+  expect(
+    screen.queryByText(/will be created and included/i)
+  ).not.toBeInTheDocument();
+});
+
 test("adds and removes posting rows down to a floor of two", async () => {
   const user = userEvent.setup();
   renderWithProviders(<ScheduleForm />);

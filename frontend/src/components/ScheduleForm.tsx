@@ -77,7 +77,9 @@ export function ScheduleForm({ onCreated }: { onCreated?: () => void }) {
   const beanFileOptions = beanFiles.data ?? [];
   const targetFileValue = (draft.target_file ?? "").trim();
   const isNewFile =
-    targetFileValue !== "" && !beanFileOptions.includes(targetFileValue);
+    beanFiles.isSuccess &&
+    targetFileValue !== "" &&
+    !beanFileOptions.includes(targetFileValue);
 
   function set<K extends keyof Draft>(key: K, value: Draft[K]) {
     setDraft((d) => ({ ...d, [key]: value }));
@@ -256,7 +258,7 @@ export function ScheduleForm({ onCreated }: { onCreated?: () => void }) {
           value={draft.target_file ?? ""}
           onChange={(v) => set("target_file", v === "" ? null : v)}
           suggestions={beanFileOptions}
-          placeholder="Default (global write settings)"
+          placeholder="Default (global write mode)"
         />
         {isNewFile && (
           <p className="text-xs text-muted-foreground">

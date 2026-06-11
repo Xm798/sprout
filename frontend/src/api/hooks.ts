@@ -52,7 +52,11 @@ export function useConfirm() {
   return useMutation({
     mutationFn: ({ id, body }: { id: number; body: ConfirmBody }) =>
       api.confirm(id, body),
-    onSuccess: () => qc.invalidateQueries({ queryKey: qk.inbox }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: qk.inbox });
+      // Confirming may create the schedule's target file on disk.
+      qc.invalidateQueries({ queryKey: qk.beanFiles });
+    },
   });
 }
 
