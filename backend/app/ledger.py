@@ -4,6 +4,12 @@ import tempfile
 from beancount import loader
 from beancount.core import data
 
+# The default pickle load cache invalidates only on mtimes of files already in
+# the cached include list, so a file newly created under an existing glob
+# include would be invisible to included_files on ledgers that load >1s.
+# Deterministic loads also keep .picklecache files out of the user's ledger.
+loader.initialize(use_cache=False)
+
 
 def _load(path: str):
     return loader.load_file(path)

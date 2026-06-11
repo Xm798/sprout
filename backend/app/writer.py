@@ -11,6 +11,7 @@ def resolve_root(config: AppConfig) -> Path:
 
 
 def target_path(config: AppConfig, when: datetime.date, target_file: str | None = None) -> Path:
+    # A non-None target_file must already have passed validate_target_file.
     root = resolve_root(config)
     if target_file:
         return root / target_file
@@ -67,6 +68,8 @@ def ensure_included(config: AppConfig, target: Path) -> None:
     a beancount error, so creation must precede the reachability check),
     then appends an include line to the main file unless the target is
     already reachable — directly, via a sub-file, or via a glob include.
+    Integrates whatever path it is given; callers are responsible for
+    validating it (validate_target_file) beforehand.
     """
     target = Path(target)
     target.parent.mkdir(parents=True, exist_ok=True)
