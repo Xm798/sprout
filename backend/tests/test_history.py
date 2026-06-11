@@ -130,6 +130,25 @@ def test_readd_restores_missing_transaction(client, tmp_path):
     assert client.get("/api/history/check").json()["missing"] == []
 
 
+def test_readd_honors_schedule_target_file(client, tmp_path):
+    """Re-add must restore into the schedule's target_file, not the global
+    write-strategy file."""
+    client.post("/api/schedules", json=new_schedule_payload(target_file="rent.bean"))
+    occ = client.get("/api/inbox").json()[0]
+    confirmed = client.post(f"/api/inbox/{occ['id']}/confirm", json={}).json()
+    rent = tmp_path / "rent.bean"
+    assert confirmed["written_path"] == str(rent)
+
+    rent.write_text("")
+    assert client.get("/api/history/check").json()["missing"] == [occ["id"]]
+    r = client.post(f"/api/history/{occ['id']}/readd")
+    assert r.status_code == 200, r.text
+    assert r.json()["written_path"] == str(rent)
+    assert confirmed["sprout_id"] in rent.read_text()
+    assert not (tmp_path / "sprout.bean").exists()
+    assert client.get("/api/history/check").json()["missing"] == []
+
+
 def test_readd_still_present_409(client):
     occ_id = _seeded_inbox(client)[0]["id"]
     client.post(f"/api/inbox/{occ_id}/confirm", json={})

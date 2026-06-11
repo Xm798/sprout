@@ -224,12 +224,16 @@ def readd_occurrence(session: Session, config: AppConfig, occurrence_id: int) ->
             f"transaction {occ.sprout_id} is still present in the ledger"
         )
 
+    # Same routing as confirm: honor the schedule's target_file (re-validated
+    # at write time) so re-add restores into the same destination.
+    tf = validate_target_file(config, sch.target_file)
+
     postings = parse_postings(sch.postings)
     effective = _validate_effective(postings, _merged_overrides(occ, None))
     text = render_occurrence(occ, sch, effective_postings=effective)
 
     eff_date, _narration = _effective_meta(occ, sch)
-    path = target_path(config, eff_date)
+    path = target_path(config, eff_date, target_file=tf)
     # The include-tree scan above cannot see files the main ledger doesn't
     # include; a direct check on the target file prevents double-appending when
     # the user's `include` line is missing.
@@ -244,6 +248,8 @@ def readd_occurrence(session: Session, config: AppConfig, occurrence_id: int) ->
     snippet_errors = validate_snippet(config.ledger_main_file, text)
     if snippet_errors:
         raise ValueError("; ".join(snippet_errors))
+    if tf:
+        ensure_included(config, path)
     append_transaction(path, text)
 
     occ.written_path = str(path)
