@@ -1,5 +1,7 @@
 import datetime
 
+import pytest
+
 from app.bean_format import format_transaction, apply_beanfmt
 from app.postings import Posting, Cost, Price
 
@@ -97,17 +99,16 @@ _SAMPLE = (
 )
 
 
-def test_apply_beanfmt_defaults_when_no_config(tmp_path):
-    text = apply_beanfmt(_SAMPLE, tmp_path)
+# All three "no config available" paths — workspace without a config file,
+# no workspace at all, nonexistent directory — must format with defaults.
+@pytest.mark.parametrize("workspace", ["empty-dir", "none", "missing-dir"])
+def test_apply_beanfmt_defaults_without_config(tmp_path, workspace):
+    ws = {"empty-dir": tmp_path, "none": None, "missing-dir": tmp_path / "nope"}[workspace]
+    text = apply_beanfmt(_SAMPLE, ws)
     # beanfmt defaults: 4-space indent, meta and sprout-id line preserved
     assert "    Expenses:Subscription" in text
     assert 'sprout-id: "sch1-20260615"' in text
     assert text.endswith("\n")
-
-
-def test_apply_beanfmt_none_workspace_uses_defaults():
-    text = apply_beanfmt(_SAMPLE, None)
-    assert "    Expenses:Subscription" in text
 
 
 def test_apply_beanfmt_loads_workspace_config(tmp_path):
@@ -120,9 +121,3 @@ def test_apply_beanfmt_loads_workspace_config(tmp_path):
 def test_apply_beanfmt_invalid_config_returns_input_unchanged(tmp_path):
     (tmp_path / ".beanfmt.toml").write_text("indent = [broken\n")
     assert apply_beanfmt(_SAMPLE, tmp_path) == _SAMPLE
-
-
-def test_apply_beanfmt_missing_workspace_dir_falls_back(tmp_path):
-    text = apply_beanfmt(_SAMPLE, tmp_path / "nope")
-    # nonexistent dir: skip config discovery, still format with defaults
-    assert "    Expenses:Subscription" in text
