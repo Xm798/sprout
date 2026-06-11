@@ -33,7 +33,7 @@ def inbox(session: Session = Depends(get_session)) -> list[Occurrence]:
 @router.get("/{occurrence_id}/preview")
 def preview(occurrence_id: int, session: Session = Depends(get_session)) -> dict:
     try:
-        return {"text": services.build_preview(session, occurrence_id)}
+        return {"text": services.build_preview(session, _config(session), occurrence_id)}
     except LookupError as exc:
         raise HTTPException(404, str(exc))
     except (ValueError, ArithmeticError) as exc:
@@ -44,7 +44,7 @@ def preview(occurrence_id: int, session: Session = Depends(get_session)) -> dict
 def preview_transient(occurrence_id: int, body: PreviewBody, session: Session = Depends(get_session)) -> dict:
     try:
         return {"text": services.build_preview(
-            session, occurrence_id,
+            session, _config(session), occurrence_id,
             override_amounts=body.override_amounts,
             override_date=body.override_date,
             override_narration=body.override_narration,

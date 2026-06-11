@@ -1,4 +1,5 @@
 import datetime
+from pathlib import Path
 from typing import Optional
 
 from sqlmodel import Session, select
@@ -6,7 +7,7 @@ from sqlmodel import Session, select
 from app.config import AppConfig
 from app.models import Schedule, Occurrence, ScheduleCreate
 from app.due_engine import compute_due_dates
-from app.bean_format import format_transaction
+from app.bean_format import format_transaction, apply_beanfmt
 from app.postings import Posting, parse_postings, dump_postings, validate_postings, validate_overrides, struct_key
 from app.ledger import validate_snippet, load_sprout_ids
 from app.writer import target_path, append_transaction, ensure_included, validate_target_file
@@ -102,7 +103,18 @@ def render_occurrence(
     )
 
 
-def build_preview(session: Session, occurrence_id: int, **transient) -> str:
+def _ledger_workspace(config: AppConfig) -> Optional[Path]:
+    """Directory beanfmt config discovery starts from: the main ledger's
+    directory (where a user's .beanfmt.toml conventionally lives), falling
+    back to the ledger root."""
+    if config.ledger_main_file:
+        return Path(config.ledger_main_file).parent
+    if config.ledger_root:
+        return Path(config.ledger_root)
+    return None
+
+
+def build_preview(session: Session, config: AppConfig, occurrence_id: int, **transient) -> str:
     occ = session.get(Occurrence, occurrence_id)
     if occ is None:
         raise LookupError(f"occurrence {occurrence_id} not found")
@@ -114,9 +126,10 @@ def build_preview(session: Session, occurrence_id: int, **transient) -> str:
     # stale stored keys must error too, not just incoming ones.
     merged = _merged_overrides(occ, transient.get("override_amounts"))
     effective = _validate_effective(postings, merged)
-    return render_occurrence(occ, sch, effective_postings=effective, **{
+    text = render_occurrence(occ, sch, effective_postings=effective, **{
         k: v for k, v in transient.items() if k != "override_amounts"
     })
+    return apply_beanfmt(text, _ledger_workspace(config))
 
 
 def confirm_occurrence(
@@ -152,7 +165,11 @@ def confirm_occurrence(
     # was saved must not let the write escape the ledger root.
     tf = validate_target_file(config, sch.target_file)
 
-    text = render_occurrence(occ, sch, effective_postings=effective)
+    # Format before validating so the snippet checked is exactly what's written.
+    text = apply_beanfmt(
+        render_occurrence(occ, sch, effective_postings=effective),
+        _ledger_workspace(config),
+    )
     snippet_errors = validate_snippet(config.ledger_main_file, text)
     if snippet_errors:
         raise ValueError("; ".join(snippet_errors))
@@ -226,7 +243,10 @@ def readd_occurrence(session: Session, config: AppConfig, occurrence_id: int) ->
 
     postings = parse_postings(sch.postings)
     effective = _validate_effective(postings, _merged_overrides(occ, None))
-    text = render_occurrence(occ, sch, effective_postings=effective)
+    text = apply_beanfmt(
+        render_occurrence(occ, sch, effective_postings=effective),
+        _ledger_workspace(config),
+    )
 
     eff_date, _narration = _effective_meta(occ, sch)
     path = target_path(config, eff_date)

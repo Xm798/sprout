@@ -1,6 +1,6 @@
 import datetime
 
-from app.bean_format import format_transaction
+from app.bean_format import format_transaction, apply_beanfmt
 from app.postings import Posting, Cost, Price
 
 
@@ -85,3 +85,44 @@ def test_total_cost_and_total_price():
         "  Assets:Lot  5 ACME {{500.00 USD}}\n"
         "  Assets:Cash\n"
     )
+
+
+# ── apply_beanfmt ──────────────────────────────────────────────────────────────
+
+_SAMPLE = (
+    '2026-06-15 * "Spotify" "subscription" #sprout\n'
+    '  sprout-id: "sch1-20260615"\n'
+    "  Expenses:Subscription  15.00 USD\n"
+    "  Assets:CreditCard\n"
+)
+
+
+def test_apply_beanfmt_defaults_when_no_config(tmp_path):
+    text = apply_beanfmt(_SAMPLE, tmp_path)
+    # beanfmt defaults: 4-space indent, meta and sprout-id line preserved
+    assert "    Expenses:Subscription" in text
+    assert 'sprout-id: "sch1-20260615"' in text
+    assert text.endswith("\n")
+
+
+def test_apply_beanfmt_none_workspace_uses_defaults():
+    text = apply_beanfmt(_SAMPLE, None)
+    assert "    Expenses:Subscription" in text
+
+
+def test_apply_beanfmt_loads_workspace_config(tmp_path):
+    (tmp_path / ".beanfmt.toml").write_text("indent = 6\n")
+    text = apply_beanfmt(_SAMPLE, tmp_path)
+    assert "      Expenses:Subscription" in text
+    assert '      sprout-id: "sch1-20260615"' in text
+
+
+def test_apply_beanfmt_invalid_config_returns_input_unchanged(tmp_path):
+    (tmp_path / ".beanfmt.toml").write_text("indent = [broken\n")
+    assert apply_beanfmt(_SAMPLE, tmp_path) == _SAMPLE
+
+
+def test_apply_beanfmt_missing_workspace_dir_falls_back(tmp_path):
+    text = apply_beanfmt(_SAMPLE, tmp_path / "nope")
+    # nonexistent dir: skip config discovery, still format with defaults
+    assert "    Expenses:Subscription" in text
