@@ -57,17 +57,10 @@ def today() -> datetime.date:
 
 
 @pytest.fixture
-def tmp_ledger_config(tmp_path, demo_ledger) -> AppConfig:
+def tmp_ledger_config(config, tmp_path, demo_ledger) -> AppConfig:
     """Like `config`, but the main ledger is a copy under tmp_path so tests
     that append include lines to it cannot mutate repo files."""
     main = tmp_path / "main.bean"
     main.write_text(Path(demo_ledger).read_text())
-    return AppConfig(
-        id=1,
-        ledger_main_file=str(main),
-        ledger_root=str(tmp_path),
-        write_mode="single_file",
-        single_file_name="sprout.bean",
-        default_tag="sprout",
-        lookahead_days=0,
-    )
+    config.ledger_main_file = str(main)
+    return config

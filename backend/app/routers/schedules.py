@@ -1,10 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, select
 
-from app.db import get_session
+from app.db import get_session, get_config
 from app.models import Schedule, ScheduleBase, ScheduleCreate, ScheduleRead
 from app.postings import parse_postings, validate_postings, headline, dump_postings
-from app.config import AppConfig
 from app.writer import validate_target_file
 from app import services
 
@@ -26,11 +25,8 @@ def _validate_or_422(payload: ScheduleCreate, session: Session) -> None:
     errors = validate_postings(payload.postings)
     if errors:
         raise HTTPException(422, "; ".join(errors))
-    cfg = session.get(AppConfig, 1)
-    if cfg is None:
-        raise HTTPException(500, "config not initialized")
     try:
-        payload.target_file = validate_target_file(cfg, payload.target_file)
+        payload.target_file = validate_target_file(get_config(session), payload.target_file)
     except ValueError as exc:
         raise HTTPException(422, str(exc))
 

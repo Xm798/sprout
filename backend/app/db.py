@@ -3,6 +3,7 @@ import os
 import uuid
 from decimal import Decimal
 
+from fastapi import HTTPException
 from sqlalchemy import inspect, text
 from sqlalchemy.engine import make_url
 from sqlmodel import SQLModel, Session, create_engine
@@ -186,3 +187,11 @@ def init_db() -> None:
 def get_session():
     with Session(engine) as session:
         yield session
+
+
+def get_config(session: Session) -> AppConfig:
+    """Fetch the singleton AppConfig row or fail the request with a 500."""
+    cfg = session.get(AppConfig, 1)
+    if cfg is None:
+        raise HTTPException(500, "config not initialized")
+    return cfg

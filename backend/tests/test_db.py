@@ -3,10 +3,9 @@ import json
 
 import pytest
 from sqlalchemy import text, inspect
-from sqlalchemy.pool import StaticPool
 from sqlmodel import create_engine
 
-from app.db import make_engine, migrate_legacy_schema, _columns
+from app.db import make_engine, migrate_legacy_schema
 
 
 def test_sqlite_url_gets_check_same_thread():
@@ -313,15 +312,14 @@ def test_migration_raises_on_malformed_postings_json():
 
 
 def test_migration_adds_target_file_column():
-    engine = create_engine(
-        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
-    )
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
     with engine.begin() as conn:
         conn.execute(text(
             "CREATE TABLE schedule (id INTEGER PRIMARY KEY, name VARCHAR, postings JSON)"
         ))
     migrate_legacy_schema(engine)
-    assert "target_file" in _columns(engine, "schedule")
+    cols = {c["name"] for c in inspect(engine).get_columns("schedule")}
+    assert "target_file" in cols
     # idempotent: second run must not raise
     migrate_legacy_schema(engine)
 

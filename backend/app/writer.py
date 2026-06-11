@@ -73,14 +73,26 @@ def ensure_included(config: AppConfig, target: Path) -> None:
     Integrates whatever path it is given; callers are responsible for
     validating it (validate_target_file) beforehand.
     """
-    target = Path(target)
     if target.is_dir():
         raise ValueError("target_file is a directory")
     target.parent.mkdir(parents=True, exist_ok=True)
     if not target.exists():
         target.touch()
     main = Path(config.ledger_main_file).resolve()
+    rel = Path(os.path.relpath(target.resolve(), main.parent)).as_posix()
+    include_line = f'include "{rel}"'
+    # The include path is interpolated into the ledger unescaped; a quote
+    # would bake a permanent parse error into the main file. validate_target_file
+    # rejects quotes in target_file, but rel can also inherit one from the
+    # configured root/main paths — guard at the interpolation itself.
+    if '"' in rel:
+        raise ValueError("include path must not contain quotes")
+    # Fast path: the exact line this function appends is already present.
+    # Skips the full-ledger reachability load on every steady-state confirm;
+    # glob/sub-file-reachable targets fall through to the loader check.
+    main_text = main.read_text() if main.exists() else ""
+    if any(line.strip() == include_line for line in main_text.splitlines()):
+        return
     if os.path.realpath(target) in included_files(str(main)):
         return
-    rel = Path(os.path.relpath(target.resolve(), main.parent)).as_posix()
-    append_transaction(main, f'include "{rel}"\n')
+    append_transaction(main, include_line + "\n")
