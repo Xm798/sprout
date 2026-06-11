@@ -148,6 +148,13 @@ def _migrate_occurrence(engine) -> None:
             conn.execute(text("ALTER TABLE occurrence DROP COLUMN override_amount"))
 
 
+def _add_target_file_column(engine) -> None:
+    sched_cols = _columns(engine, "schedule")
+    if sched_cols and "target_file" not in sched_cols:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE schedule ADD COLUMN target_file VARCHAR"))
+
+
 def migrate_legacy_schema(engine) -> None:
     """Idempotently upgrade a pre-multi-posting database. No-op on fresh or
     already-migrated databases. Schedule is migrated before occurrence because
@@ -161,6 +168,7 @@ def migrate_legacy_schema(engine) -> None:
     occ_cols = _columns(engine, "occurrence")
     if occ_cols and "override_amount" in occ_cols:
         _migrate_occurrence(engine)
+    _add_target_file_column(engine)
 
 
 def init_db() -> None:

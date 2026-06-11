@@ -18,6 +18,8 @@ class ScheduleBase(SQLModel):
     max_count: Optional[int] = None
     tags: str = ""  # comma-separated tag names (no '#')
     status: str = "active"  # active | paused
+    # relative .bean path under the ledger root; None = global write strategy
+    target_file: Optional[str] = None
 
 
 class Schedule(ScheduleBase, table=True):
