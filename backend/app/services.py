@@ -9,7 +9,7 @@ from app.due_engine import compute_due_dates
 from app.bean_format import format_transaction
 from app.postings import Posting, parse_postings, dump_postings, validate_postings, validate_overrides, struct_key
 from app.ledger import validate_snippet, load_sprout_ids
-from app.writer import target_path, append_transaction
+from app.writer import target_path, append_transaction, ensure_included, validate_target_file
 
 
 class ConflictError(RuntimeError):
@@ -148,13 +148,19 @@ def confirm_occurrence(
     if override_narration is not None:
         occ.override_narration = override_narration
 
+    # Re-validate cheaply at write time: a symlink created after the schedule
+    # was saved must not let the write escape the ledger root.
+    tf = validate_target_file(config, sch.target_file)
+
     text = render_occurrence(occ, sch, effective_postings=effective)
     snippet_errors = validate_snippet(config.ledger_main_file, text)
     if snippet_errors:
         raise ValueError("; ".join(snippet_errors))
 
     eff_date, _narration = _effective_meta(occ, sch)
-    path = target_path(config, eff_date)
+    path = target_path(config, eff_date, target_file=tf)
+    if tf:
+        ensure_included(config, path)
     append_transaction(path, text)
 
     occ.status = "confirmed"

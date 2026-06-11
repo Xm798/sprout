@@ -4,8 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlmodel import Session, select
 
-from app.db import get_session
-from app.config import AppConfig
+from app.db import get_session, get_config as _config
 from app.models import Occurrence
 from app import services
 
@@ -20,13 +19,6 @@ class ConfirmBody(BaseModel):
 
 class PreviewBody(ConfirmBody):
     pass
-
-
-def _config(session: Session) -> AppConfig:
-    cfg = session.get(AppConfig, 1)
-    if cfg is None:
-        raise HTTPException(500, "config not initialized")
-    return cfg
 
 
 @router.get("", response_model=list[Occurrence])

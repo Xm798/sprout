@@ -32,6 +32,7 @@ export interface ScheduleCreate {
   max_count?: number | null;
   tags: string;
   status: string; // active | paused
+  target_file?: string | null; // relative .bean path; null = global write strategy
 }
 
 export interface Schedule extends ScheduleCreate {

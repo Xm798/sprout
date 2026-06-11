@@ -1,18 +1,22 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from sqlmodel import Session
 
-from app.db import get_session
+from app.db import get_session, get_config as _config
 from app.config import AppConfig
 from app.ledger import load_accounts, load_currencies
+from app.writer import resolve_root
 
 router = APIRouter()
 
 
-def _config(session: Session) -> AppConfig:
-    cfg = session.get(AppConfig, 1)
-    if cfg is None:
-        raise HTTPException(500, "config not initialized")
-    return cfg
+@router.get("/bean-files")
+def bean_files(session: Session = Depends(get_session)) -> list[str]:
+    root = resolve_root(_config(session))
+    if not root.is_dir():
+        return []
+    return sorted(
+        p.relative_to(root).as_posix() for p in root.rglob("*.bean") if p.is_file()
+    )
 
 
 @router.get("/accounts")

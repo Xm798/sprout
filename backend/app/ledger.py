@@ -4,9 +4,27 @@ import tempfile
 from beancount import loader
 from beancount.core import data
 
+# The default pickle load cache invalidates only on mtimes of files already in
+# the cached include list, so a file newly created under an existing glob
+# include would be invisible to included_files on ledgers that load >1s.
+# Deterministic loads also keep .picklecache files out of the user's ledger.
+loader.initialize(use_cache=False)
+
 
 def _load(path: str):
     return loader.load_file(path)
+
+
+def included_files(main_path: str) -> set[str]:
+    """Real paths of every file the ledger loads, including the main file.
+
+    Uses the loader's own ``options_map["include"]`` so glob includes,
+    relative paths, cycles, and missing includes are all handled by
+    beancount itself — a textual walk of ``include`` directives would miss
+    glob-covered files and cause duplicate includes downstream.
+    """
+    _entries, _errors, options_map = _load(os.path.abspath(main_path))
+    return {os.path.realpath(p) for p in options_map.get("include", [])}
 
 
 def load_accounts(path: str) -> list[str]:

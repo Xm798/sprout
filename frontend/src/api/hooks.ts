@@ -10,6 +10,7 @@ export const qk = {
   accounts: ["accounts"] as const,
   currencies: ["currencies"] as const,
   config: ["config"] as const,
+  beanFiles: ["bean-files"] as const,
   preview: (id: number, body: PreviewBody) => ["preview", id, body] as const,
 };
 
@@ -57,6 +58,8 @@ export function useConfirm() {
       qc.invalidateQueries({ queryKey: qk.inbox });
       // A confirmed occurrence enters the history list.
       qc.invalidateQueries({ queryKey: qk.history });
+      // Confirming may create the schedule's target file on disk.
+      qc.invalidateQueries({ queryKey: qk.beanFiles });
     },
   });
 }
@@ -101,6 +104,10 @@ export function useReadd() {
 
 export function useAccounts() {
   return useQuery({ queryKey: qk.accounts, queryFn: api.accounts });
+}
+
+export function useBeanFiles() {
+  return useQuery({ queryKey: qk.beanFiles, queryFn: api.beanFiles });
 }
 
 export function useCurrencies() {

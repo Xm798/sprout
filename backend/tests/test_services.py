@@ -399,3 +399,62 @@ def test_delete_schedule_removes_occurrences_of_all_statuses(session, config, to
 def test_delete_schedule_missing_raises_lookup_error(session):
     with pytest.raises(LookupError):
         services.delete_schedule(session, 99999)
+
+
+def test_confirm_writes_to_schedule_target_file(session, tmp_ledger_config, today):
+    sch = _make_schedule(session)
+    sch.target_file = "subscriptions.bean"
+    session.add(sch)
+    session.commit()
+    services.materialize_occurrences(session, tmp_ledger_config, today)
+    occ = _first_occ(session, sch)
+
+    services.confirm_occurrence(session, tmp_ledger_config, occ.id)
+
+    root = Path(tmp_ledger_config.ledger_root)
+    target = root / "subscriptions.bean"
+    assert "Spotify" in target.read_text()
+    assert not (root / "sprout.bean").exists()  # global file untouched
+    session.refresh(occ)
+    assert occ.written_path == str(target)
+    main_text = Path(tmp_ledger_config.ledger_main_file).read_text()
+    assert main_text.count('include "subscriptions.bean"') == 1
+
+
+def test_second_confirm_does_not_duplicate_include(session, tmp_ledger_config, today):
+    sch = _make_schedule(session)
+    sch.target_file = "subscriptions.bean"
+    session.add(sch)
+    session.commit()
+    services.materialize_occurrences(session, tmp_ledger_config, today)
+    occs = session.exec(
+        sqlmodel.select(Occurrence).where(Occurrence.schedule_id == sch.id)
+    ).all()
+    services.confirm_occurrence(session, tmp_ledger_config, occs[0].id)
+    services.confirm_occurrence(session, tmp_ledger_config, occs[1].id)
+    main_text = Path(tmp_ledger_config.ledger_main_file).read_text()
+    assert main_text.count('include "subscriptions.bean"') == 1
+
+
+def test_confirm_without_target_file_uses_global_strategy(session, tmp_ledger_config, today):
+    sch = _make_schedule(session)  # target_file stays None
+    before = Path(tmp_ledger_config.ledger_main_file).read_text()
+    services.materialize_occurrences(session, tmp_ledger_config, today)
+    occ = _first_occ(session, sch)
+    services.confirm_occurrence(session, tmp_ledger_config, occ.id)
+    session.refresh(occ)
+    assert occ.written_path == str(Path(tmp_ledger_config.ledger_root) / "sprout.bean")
+    assert Path(tmp_ledger_config.ledger_main_file).read_text() == before  # main untouched
+
+
+def test_confirm_rejects_target_file_escaping_root(session, tmp_ledger_config, today):
+    sch = _make_schedule(session)
+    sch.target_file = "../escape.bean"  # bypassed router validation (e.g. old DB row)
+    session.add(sch)
+    session.commit()
+    services.materialize_occurrences(session, tmp_ledger_config, today)
+    occ = _first_occ(session, sch)
+    with pytest.raises(ValueError):
+        services.confirm_occurrence(session, tmp_ledger_config, occ.id)
+    session.refresh(occ)
+    assert occ.status == "pending"

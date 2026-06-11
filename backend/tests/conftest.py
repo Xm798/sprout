@@ -72,3 +72,13 @@ def config(tmp_path, demo_ledger) -> AppConfig:
 @pytest.fixture
 def today() -> datetime.date:
     return datetime.date(2026, 6, 8)
+
+
+@pytest.fixture
+def tmp_ledger_config(config, tmp_path, demo_ledger) -> AppConfig:
+    """Like `config`, but the main ledger is a copy under tmp_path so tests
+    that append include lines to it cannot mutate repo files."""
+    main = tmp_path / "main.bean"
+    main.write_text(Path(demo_ledger).read_text())
+    config.ledger_main_file = str(main)
+    return config

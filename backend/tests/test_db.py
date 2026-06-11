@@ -1,3 +1,4 @@
+import datetime
 import json
 
 import pytest
@@ -308,3 +309,28 @@ def test_migration_raises_on_malformed_postings_json():
     # Schema must not have been mutated: setup error must prevent DDL.
     occ_cols = {c["name"] for c in inspect(engine).get_columns("occurrence")}
     assert "override_amounts" not in occ_cols
+
+
+def test_migration_adds_target_file_column():
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
+    with engine.begin() as conn:
+        conn.execute(text(
+            "CREATE TABLE schedule (id INTEGER PRIMARY KEY, name VARCHAR, postings JSON)"
+        ))
+    migrate_legacy_schema(engine)
+    cols = {c["name"] for c in inspect(engine).get_columns("schedule")}
+    assert "target_file" in cols
+    # idempotent: second run must not raise
+    migrate_legacy_schema(engine)
+
+
+def test_schedule_model_has_target_file_default_none(session):
+    from app.models import Schedule
+    sch = Schedule(
+        name="x", interval_unit="month", anchor_date=datetime.date(2026, 1, 1),
+        postings=[],
+    )
+    session.add(sch)
+    session.commit()
+    session.refresh(sch)
+    assert sch.target_file is None

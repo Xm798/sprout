@@ -72,6 +72,7 @@ export const api = {
 
   accounts: () => http<string[]>("/accounts"),
   currencies: () => http<string[]>("/currencies"),
+  beanFiles: () => http<string[]>("/bean-files"),
   getConfig: () => http<AppConfig>("/config"),
   updateConfig: (body: AppConfig) =>
     http<AppConfig>("/config", { method: "PUT", body: JSON.stringify(body) }),

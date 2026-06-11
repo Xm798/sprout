@@ -3,7 +3,7 @@ import type { FormEvent } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
-import { useAccounts, useCreateSchedule, useCurrencies } from "@/api/hooks";
+import { useAccounts, useBeanFiles, useCreateSchedule, useCurrencies } from "@/api/hooks";
 import type { IntervalUnit, Posting, ScheduleCreate } from "@/api/types";
 import { Button } from "@/components/ui/button";
 import { Combobox } from "@/components/ui/combobox";
@@ -28,7 +28,10 @@ interface DraftPosting {
   currency: string;
 }
 
-type Draft = Omit<ScheduleCreate, "postings"> & { postings: DraftPosting[] };
+type Draft = Omit<ScheduleCreate, "postings" | "target_file"> & {
+  postings: DraftPosting[];
+  target_file: string;
+};
 
 function newLeg(currency = "USD"): DraftPosting {
   return { id: crypto.randomUUID(), account: "", amount: "", currency };
@@ -46,6 +49,7 @@ function emptyDraft(): Draft {
     max_count: null,
     tags: "sprout",
     status: "active",
+    target_file: "",
     postings: [newLeg("USD"), newLeg("")],
   };
 }
@@ -58,7 +62,7 @@ function toPayload(draft: Draft): ScheduleCreate {
       ? { id: p.id, account, amount: null, currency: null }
       : { id: p.id, account, amount, currency: p.currency };
   });
-  return { ...draft, postings };
+  return { ...draft, target_file: draft.target_file.trim() || null, postings };
 }
 
 const UNITS: IntervalUnit[] = ["day", "week", "month", "quarter", "year"];
@@ -67,10 +71,17 @@ export function ScheduleForm({ onCreated }: { onCreated?: () => void }) {
   const [draft, setDraft] = useState<Draft>(emptyDraft);
   const accounts = useAccounts();
   const currencies = useCurrencies();
+  const beanFiles = useBeanFiles();
   const create = useCreateSchedule();
 
   const accountOptions = accounts.data ?? [];
   const currencyOptions = currencies.data ?? [];
+  const beanFileOptions = beanFiles.data ?? [];
+  const targetFileValue = draft.target_file.trim();
+  const isNewFile =
+    beanFiles.isSuccess &&
+    targetFileValue !== "" &&
+    !beanFileOptions.includes(targetFileValue);
 
   function set<K extends keyof Draft>(key: K, value: Draft[K]) {
     setDraft((d) => ({ ...d, [key]: value }));
@@ -239,6 +250,24 @@ export function ScheduleForm({ onCreated }: { onCreated?: () => void }) {
           value={draft.anchor_date}
           onChange={(v) => set("anchor_date", v)}
         />
+      </div>
+
+      <div className="space-y-1.5">
+        <Label htmlFor="sf-target-file">Target file</Label>
+        <Combobox
+          id="sf-target-file"
+          aria-label="Target file"
+          value={draft.target_file}
+          onChange={(v) => set("target_file", v)}
+          suggestions={beanFileOptions}
+          placeholder="Default (global write mode)"
+        />
+        {isNewFile && (
+          <p className="text-xs text-muted-foreground">
+            New file — it will be created and included in the main ledger
+            automatically.
+          </p>
+        )}
       </div>
 
       <Button type="submit" disabled={create.isPending} className="w-full">

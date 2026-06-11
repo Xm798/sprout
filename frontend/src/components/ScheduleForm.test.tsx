@@ -9,6 +9,7 @@ vi.mock("../api/client", () => ({
   api: {
     accounts: vi.fn().mockResolvedValue(["Assets:CreditCard", "Expenses:Subscription"]),
     currencies: vi.fn().mockResolvedValue(["USD", "CNY"]),
+    beanFiles: vi.fn().mockResolvedValue(["rent.bean", "loans/car.bean"]),
     createSchedule: vi.fn().mockResolvedValue({ id: 1 }),
   },
 }));
@@ -60,6 +61,63 @@ test("submits a new schedule with an amount leg and an auto-balance leg", async 
       currency: null,
     },
   ]);
+});
+
+test("submits null target_file when the field is left empty", async () => {
+  const user = userEvent.setup();
+  renderWithProviders(<ScheduleForm />);
+
+  await user.type(screen.getByLabelText(/^name$/i), "Spotify");
+  await user.type(screen.getByLabelText(/account 1/i), "Expenses:Subscription");
+  await user.type(screen.getByLabelText(/amount 1/i), "15.00");
+  await user.type(screen.getByLabelText(/account 2/i), "Assets:CreditCard");
+  await user.click(screen.getByLabelText(/starting from/i));
+  await user.click(await screen.findByRole("button", { name: /today/i }));
+
+  await user.click(screen.getByRole("button", { name: /create schedule/i }));
+
+  await waitFor(() => expect(api.createSchedule).toHaveBeenCalledTimes(1));
+  const arg = (api.createSchedule as ReturnType<typeof vi.fn>).mock.calls[0][0];
+  expect(arg.target_file).toBeNull();
+});
+
+test("submits the typed target_file and hints when it is a new file", async () => {
+  const user = userEvent.setup();
+  renderWithProviders(<ScheduleForm />);
+
+  await user.type(screen.getByLabelText(/^name$/i), "Rent");
+  await user.type(screen.getByLabelText(/account 1/i), "Expenses:Subscription");
+  await user.type(screen.getByLabelText(/amount 1/i), "1500.00");
+  await user.type(screen.getByLabelText(/account 2/i), "Assets:CreditCard");
+  await user.click(screen.getByLabelText(/starting from/i));
+  await user.click(await screen.findByRole("button", { name: /today/i }));
+
+  await user.type(screen.getByLabelText(/target file/i), "housing.bean");
+  // not in the mocked bean-files list -> new-file hint appears
+  expect(
+    await screen.findByText(/will be created and included/i)
+  ).toBeInTheDocument();
+
+  await user.click(screen.getByRole("button", { name: /create schedule/i }));
+
+  await waitFor(() => expect(api.createSchedule).toHaveBeenCalledTimes(1));
+  const arg = (api.createSchedule as ReturnType<typeof vi.fn>).mock.calls[0][0];
+  expect(arg.target_file).toBe("housing.bean");
+});
+
+test("shows no new-file hint for an existing bean file", async () => {
+  const user = userEvent.setup();
+  renderWithProviders(<ScheduleForm />);
+
+  // Type a prefix and pick the existing file from the suggestion list — the
+  // option appearing proves the bean-files query has resolved.
+  await user.type(screen.getByLabelText(/target file/i), "rent");
+  await user.click(await screen.findByRole("option", { name: /rent\.bean/i }));
+
+  expect(screen.getByLabelText(/target file/i)).toHaveValue("rent.bean");
+  expect(
+    screen.queryByText(/will be created and included/i)
+  ).not.toBeInTheDocument();
 });
 
 test("adds and removes posting rows down to a floor of two", async () => {
