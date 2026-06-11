@@ -9,7 +9,7 @@ from app.due_engine import compute_due_dates
 from app.bean_format import format_transaction
 from app.postings import Posting, parse_postings, dump_postings, validate_postings, validate_overrides, struct_key
 from app.ledger import validate_snippet
-from app.writer import target_path, append_transaction
+from app.writer import target_path, append_transaction, ensure_included, validate_target_file
 
 
 def materialize_occurrences(session: Session, config: AppConfig, today: datetime.date) -> int:
@@ -150,7 +150,12 @@ def confirm_occurrence(
         raise ValueError("; ".join(snippet_errors))
 
     eff_date, _narration = _effective_meta(occ, sch)
-    path = target_path(config, eff_date)
+    # Re-validate cheaply at write time: a symlink created after the schedule
+    # was saved must not let the write escape the ledger root.
+    tf = validate_target_file(config, sch.target_file)
+    path = target_path(config, eff_date, target_file=tf)
+    if tf:
+        ensure_included(config, path)
     append_transaction(path, text)
 
     occ.status = "confirmed"
