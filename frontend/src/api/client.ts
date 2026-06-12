@@ -47,6 +47,8 @@ export const api = {
   listSchedules: () => http<Schedule[]>("/schedules"),
   createSchedule: (body: ScheduleCreate) =>
     http<Schedule>("/schedules", { method: "POST", body: JSON.stringify(body) }),
+  updateSchedule: (id: number, body: ScheduleCreate) =>
+    http<Schedule>(`/schedules/${id}`, { method: "PUT", body: JSON.stringify(body) }),
   deleteSchedule: (id: number) =>
     http<{ ok: boolean }>(`/schedules/${id}`, { method: "DELETE" }),
 
