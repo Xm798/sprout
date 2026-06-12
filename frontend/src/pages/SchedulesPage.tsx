@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { CalendarPlus, Pencil, Plus, Repeat, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -52,6 +52,15 @@ function ScheduleCard({ schedule }: { schedule: Schedule }) {
   const del = useDeleteSchedule();
   const [editOpen, setEditOpen] = useState(false);
   const isDesktop = useMediaQuery("(min-width: 768px)");
+  const editTriggerRef = useRef<HTMLButtonElement>(null);
+
+  // The edit dialog is controlled without a Radix trigger, so its default
+  // close-focus return targets a null ref; restore focus to the pencil
+  // button ourselves once the focus trap has been torn down.
+  function restoreEditFocus(e: Event) {
+    e.preventDefault();
+    editTriggerRef.current?.focus();
+  }
 
   const editForm = (
     <ScheduleForm schedule={schedule} onSaved={() => setEditOpen(false)} />
@@ -87,6 +96,7 @@ function ScheduleCard({ schedule }: { schedule: Schedule }) {
           </span>
           <div className="flex items-center gap-0.5">
             <Button
+              ref={editTriggerRef}
               variant="ghost"
               size="icon"
               className="h-8 w-8 text-muted-foreground"
@@ -114,7 +124,10 @@ function ScheduleCard({ schedule }: { schedule: Schedule }) {
       </CardContent>
       {isDesktop ? (
         <Dialog open={editOpen} onOpenChange={setEditOpen}>
-          <DialogContent className="max-h-[90vh] overflow-y-auto [scrollbar-gutter:stable]">
+          <DialogContent
+            className="max-h-[90vh] overflow-y-auto [scrollbar-gutter:stable]"
+            onCloseAutoFocus={restoreEditFocus}
+          >
             <DialogHeader>
               <DialogTitle>Edit schedule</DialogTitle>
               <DialogDescription>
@@ -130,6 +143,7 @@ function ScheduleCard({ schedule }: { schedule: Schedule }) {
           <SheetContent
             side="bottom"
             className="max-h-[92vh] overflow-y-auto p-6 pb-8 [scrollbar-gutter:stable]"
+            onCloseAutoFocus={restoreEditFocus}
           >
             <SheetHeader className="mb-4 text-left">
               <SheetTitle>Edit schedule</SheetTitle>

@@ -46,7 +46,8 @@ test("pencil button opens a prefilled edit form and saves via PUT", async () => 
   const user = userEvent.setup();
   renderWithProviders(<SchedulesPage />);
 
-  await user.click(await screen.findByRole("button", { name: /edit spotify/i }));
+  const editButton = await screen.findByRole("button", { name: /edit spotify/i });
+  await user.click(editButton);
   expect(await screen.findByLabelText(/^name$/i)).toHaveValue("Spotify");
 
   await user.click(screen.getByRole("button", { name: /save changes/i }));
@@ -56,4 +57,25 @@ test("pencil button opens a prefilled edit form and saves via PUT", async () => 
       expect.objectContaining({ name: "Spotify" })
     )
   );
+  await waitFor(() =>
+    expect(screen.queryByLabelText(/^name$/i)).not.toBeInTheDocument()
+  );
+  // The controlled dialog has no Radix trigger; onCloseAutoFocus must hand
+  // focus back to the pencil button.
+  expect(editButton).toHaveFocus();
+});
+
+test("escape closes the edit form and returns focus to the pencil button", async () => {
+  const user = userEvent.setup();
+  renderWithProviders(<SchedulesPage />);
+
+  const editButton = await screen.findByRole("button", { name: /edit spotify/i });
+  await user.click(editButton);
+  await screen.findByLabelText(/^name$/i);
+
+  await user.keyboard("{Escape}");
+  await waitFor(() =>
+    expect(screen.queryByLabelText(/^name$/i)).not.toBeInTheDocument()
+  );
+  expect(editButton).toHaveFocus();
 });
