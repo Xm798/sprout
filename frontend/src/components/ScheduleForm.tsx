@@ -81,8 +81,8 @@ function scheduleToDraft(s: Schedule): Draft {
     interval_unit: s.interval_unit,
     interval_count: s.interval_count,
     anchor_date: s.anchor_date,
-    end_date: s.end_date ?? null,
-    max_count: s.max_count ?? null,
+    end_date: s.end_date,
+    max_count: s.max_count,
     tags: s.tags,
     status: s.status,
     target_file: s.target_file ?? "",
@@ -91,8 +91,8 @@ function scheduleToDraft(s: Schedule): Draft {
       account: p.account,
       amount: p.amount ?? "",
       currency: p.currency ?? "",
-      cost: p.cost ?? null,
-      price: p.price ?? null,
+      cost: p.cost,
+      price: p.price,
     })),
   };
 }
@@ -134,9 +134,11 @@ export function ScheduleForm({
   // The config arrives async; refresh the default currency on a form the user
   // hasn't touched yet, without clobbering in-progress input or a prefilled edit.
   const touched = useRef(false);
+  // `schedule` is fixed for a mount (edit dialogs remount per open), so the
+  // only live dependency is the currency.
   useEffect(() => {
     if (!schedule && !touched.current) setDraft(emptyDraft(defaultCurrency));
-  }, [defaultCurrency, schedule]);
+  }, [defaultCurrency]);
   const accounts = useAccounts();
   const currencies = useCurrencies();
   const beanFiles = useBeanFiles();

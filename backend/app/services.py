@@ -26,8 +26,13 @@ from app.writer import (
 logger = logging.getLogger(__name__)
 
 
+def _materialization_horizon(config: AppConfig, today: datetime.date) -> datetime.date:
+    """How far ahead occurrences exist; materialization and pruning must agree."""
+    return today + datetime.timedelta(days=config.lookahead_days)
+
+
 def materialize_occurrences(session: Session, config: AppConfig, today: datetime.date) -> int:
-    horizon = today + datetime.timedelta(days=config.lookahead_days)
+    horizon = _materialization_horizon(config, today)
     created = 0
     schedules = session.exec(select(Schedule).where(Schedule.status == "active")).all()
     for sch in schedules:
@@ -406,9 +411,8 @@ def update_schedule(
     sch.postings = dump_postings(payload.postings)
     sch.updated_at = datetime.datetime.now()
 
-    # Dates the edited rule still produces within the materialization horizon
-    # (same horizon math as materialize_occurrences).
-    horizon = today + datetime.timedelta(days=config.lookahead_days)
+    # Dates the edited rule still produces within the materialization horizon.
+    horizon = _materialization_horizon(config, today)
     valid_dates = set(compute_due_dates(
         payload.anchor_date, payload.interval_unit, payload.interval_count,
         horizon, payload.end_date, payload.max_count,

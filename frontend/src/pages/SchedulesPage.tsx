@@ -48,10 +48,15 @@ function postingsSummary(s: Schedule): string {
     .join(" · ");
 }
 
-function ScheduleCard({ schedule }: { schedule: Schedule }) {
+function ScheduleCard({
+  schedule,
+  isDesktop,
+}: {
+  schedule: Schedule;
+  isDesktop: boolean;
+}) {
   const del = useDeleteSchedule();
   const [editOpen, setEditOpen] = useState(false);
-  const isDesktop = useMediaQuery("(min-width: 768px)");
   const editTriggerRef = useRef<HTMLButtonElement>(null);
 
   // The edit dialog is controlled without a Radix trigger, so its default
@@ -254,7 +259,7 @@ export function SchedulesPage() {
               className="animate-fade-up"
               style={{ animationDelay: `${Math.min(i, 8) * 40}ms` }}
             >
-              <ScheduleCard schedule={s} />
+              <ScheduleCard schedule={s} isDesktop={isDesktop} />
             </div>
           ))}
         </div>
