@@ -60,6 +60,11 @@ export interface HistoryCheck {
   missing: number[]; // ids of confirmed occurrences absent from the ledger
 }
 
+export interface WrittenTransaction {
+  path: string; // file the block currently lives in (loader-reported)
+  text: string; // the exact block, including any manual edits
+}
+
 export interface ConfirmBody {
   override_amounts?: Record<string, string>;
   override_date?: string | null;

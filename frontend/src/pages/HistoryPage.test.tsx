@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, expect, test, vi } from "vitest";
 import { HistoryPage } from "./HistoryPage";
 import { renderWithProviders } from "../test/utils";
-import { api } from "../api/client";
+import { api, ApiError } from "../api/client";
 
 const schedule = {
   id: 1,
@@ -43,15 +43,24 @@ const skippedOcc = {
   override_amounts: {},
 };
 
-vi.mock("../api/client", () => ({
-  api: {
-    getHistory: vi.fn(),
-    checkHistory: vi.fn(),
-    readd: vi.fn(),
-    listSchedules: vi.fn(),
-    getConfig: vi.fn(),
-  },
-}));
+// Keep the real ApiError class: the page uses `instanceof ApiError` to detect
+// a 409 from GET written.
+vi.mock("../api/client", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../api/client")>();
+  return {
+    ...actual,
+    api: {
+      getHistory: vi.fn(),
+      checkHistory: vi.fn(),
+      readd: vi.fn(),
+      listSchedules: vi.fn(),
+      getConfig: vi.fn(),
+      getWritten: vi.fn(),
+      unconfirm: vi.fn(),
+      unskip: vi.fn(),
+    },
+  };
+});
 
 function mockAll({ missing = [] as number[] } = {}) {
   (api.getHistory as ReturnType<typeof vi.fn>).mockResolvedValue([
@@ -68,6 +77,20 @@ function mockAll({ missing = [] as number[] } = {}) {
   });
   (api.readd as ReturnType<typeof vi.fn>).mockResolvedValue({
     ...confirmedOcc,
+  });
+  (api.getWritten as ReturnType<typeof vi.fn>).mockResolvedValue({
+    path: "/ledger/sprout.bean",
+    text: '2026-05-01 * "Rent" "monthly rent" ; hand-edited\n  sprout-id: "sch1-20260501"\n',
+  });
+  (api.unconfirm as ReturnType<typeof vi.fn>).mockResolvedValue({
+    ...confirmedOcc,
+    status: "pending",
+    written_path: null,
+    confirmed_at: null,
+  });
+  (api.unskip as ReturnType<typeof vi.fn>).mockResolvedValue({
+    ...skippedOcc,
+    status: "pending",
   });
 }
 
@@ -97,6 +120,78 @@ test("flags missing occurrences and re-adds them on click", async () => {
 
   await waitFor(() => expect(api.readd).toHaveBeenCalledTimes(1));
   expect(api.readd).toHaveBeenCalledWith(11);
+});
+
+test("edit dialog shows the written block plus warning, then unconfirms", async () => {
+  mockAll();
+  const user = userEvent.setup();
+  renderWithProviders(<HistoryPage />);
+
+  await user.click(
+    await screen.findByRole("button", { name: /edit in inbox/i })
+  );
+
+  // The exact ledger text (manual edits included) and the loss warning.
+  expect(await screen.findByText(/hand-edited/)).toBeInTheDocument();
+  expect(screen.getByText(/manual edits in this text are deleted/i)).toBeInTheDocument();
+  // The file name shows in the row AND in the dialog description.
+  expect(screen.getAllByText(/sprout\.bean/).length).toBeGreaterThan(1);
+  expect(api.getWritten).toHaveBeenCalledWith(11);
+
+  await user.click(
+    screen.getByRole("button", { name: /delete & move to inbox/i })
+  );
+  await waitFor(() => expect(api.unconfirm).toHaveBeenCalledWith(11));
+  // Dialog closes on success.
+  await waitFor(() =>
+    expect(
+      screen.queryByText(/manual edits in this text are deleted/i)
+    ).not.toBeInTheDocument()
+  );
+});
+
+test("closes the edit dialog and refreshes the check on a 409", async () => {
+  mockAll();
+  (api.getWritten as ReturnType<typeof vi.fn>).mockRejectedValue(
+    new ApiError(409, "transaction is not present in the ledger")
+  );
+  const user = userEvent.setup();
+  renderWithProviders(<HistoryPage />);
+  expect(await screen.findByText("confirmed")).toBeInTheDocument();
+  expect(api.checkHistory).toHaveBeenCalledTimes(1);
+
+  await user.click(screen.getByRole("button", { name: /edit in inbox/i }));
+
+  // Dialog never settles open: it closes and the reconcile check re-runs.
+  await waitFor(() => expect(api.checkHistory).toHaveBeenCalledTimes(2));
+  expect(
+    screen.queryByText(/manual edits in this text are deleted/i)
+  ).not.toBeInTheDocument();
+  expect(api.unconfirm).not.toHaveBeenCalled();
+});
+
+test("missing row offers re-add and move back to inbox", async () => {
+  mockAll({ missing: [11] });
+  const user = userEvent.setup();
+  renderWithProviders(<HistoryPage />);
+
+  expect(await screen.findByText(/missing from ledger/i)).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /re-add/i })).toBeInTheDocument();
+  // No dialog for the missing variant — nothing is deleted.
+  await user.click(
+    screen.getByRole("button", { name: /move back to inbox/i })
+  );
+  await waitFor(() => expect(api.unconfirm).toHaveBeenCalledWith(11));
+  expect(api.getWritten).not.toHaveBeenCalled();
+});
+
+test("skipped row unskips on click", async () => {
+  mockAll();
+  const user = userEvent.setup();
+  renderWithProviders(<HistoryPage />);
+
+  await user.click(await screen.findByRole("button", { name: /unskip/i }));
+  await waitFor(() => expect(api.unskip).toHaveBeenCalledWith(12));
 });
 
 test("shows the check error without hiding history", async () => {
