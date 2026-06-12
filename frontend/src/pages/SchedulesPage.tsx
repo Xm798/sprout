@@ -3,7 +3,7 @@ import { CalendarPlus, Plus, Repeat, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { useDeleteSchedule, useSchedules } from "@/api/hooks";
-import { analyzeFlow } from "@/api/postings";
+import { analyzeFlow, headlineDisplay } from "@/api/postings";
 import type { Schedule } from "@/api/types";
 import { FlowAccounts } from "@/components/FlowAccounts";
 import { ScheduleForm } from "@/components/ScheduleForm";
@@ -40,8 +40,7 @@ function intervalLabel(s: Schedule) {
 function ScheduleCard({ schedule }: { schedule: Schedule }) {
   const del = useDeleteSchedule();
   const flow = analyzeFlow(schedule.postings);
-  const amount = flow.amount ?? schedule.headline_amount;
-  const currency = flow.currency ?? schedule.headline_currency ?? undefined;
+  const { amount, currency } = headlineDisplay(flow, schedule);
   return (
     <Card className="group transition-shadow hover:shadow-lift">
       <CardContent className="flex items-center justify-between gap-3 p-4 sm:p-5">

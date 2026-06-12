@@ -2,7 +2,7 @@ import { CheckCheck } from "lucide-react";
 import { toast } from "sonner";
 
 import { useConfirm, useInbox, useSchedules } from "@/api/hooks";
-import { analyzeFlow } from "@/api/postings";
+import { analyzeFlow, headlineDisplay } from "@/api/postings";
 import { InboxRow } from "@/components/InboxRow";
 import { SproutMark } from "@/components/logo";
 import { Button } from "@/components/ui/button";
@@ -23,8 +23,7 @@ export function InboxPage() {
   for (const occ of items) {
     const sch = byId.get(occ.schedule_id);
     const flow = analyzeFlow(sch?.postings, occ.override_amounts);
-    const raw = flow.amount ?? sch?.headline_amount;
-    const currency = flow.currency ?? sch?.headline_currency ?? "";
+    const { amount: raw, currency = "" } = headlineDisplay(flow, sch);
     const n = Number(raw);
     if (!Number.isNaN(n)) totals.set(currency, (totals.get(currency) ?? 0) + n);
   }

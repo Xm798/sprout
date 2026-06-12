@@ -3,7 +3,7 @@ import { Check, ChevronDown, SkipForward } from "lucide-react";
 import { toast } from "sonner";
 
 import { useConfirm, usePreview, useSkip } from "@/api/hooks";
-import { analyzeFlow, headlineLeg } from "@/api/postings";
+import { analyzeFlow, headlineDisplay, headlineLeg } from "@/api/postings";
 import type { ConfirmBody, Occurrence, Schedule } from "@/api/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -36,8 +36,10 @@ export function InboxRow({
   const flow = analyzeFlow(schedule?.postings, occurrence.override_amounts);
   const amountLeg = headlineLeg(schedule?.postings);
   const headlineId = amountLeg?.id;
-  const baseAmount = flow.amount ?? schedule?.headline_amount ?? "";
-  const baseCurrency = flow.currency ?? schedule?.headline_currency ?? undefined;
+  const { amount: baseAmount = "", currency: baseCurrency } = headlineDisplay(
+    flow,
+    schedule
+  );
   // The editable leg's own effective amount — distinct from the net headline.
   const legAmount =
     (headlineId != null ? occurrence.override_amounts[headlineId] : undefined) ??
@@ -156,7 +158,7 @@ export function InboxRow({
                 id={`${fieldId}-amount`}
                 inputMode="decimal"
                 disabled={headlineId == null}
-                placeholder={String(legAmount)}
+                placeholder={legAmount}
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
               />

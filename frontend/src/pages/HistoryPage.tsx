@@ -16,7 +16,7 @@ import {
   useUnskip,
   useWritten,
 } from "@/api/hooks";
-import { analyzeFlow } from "@/api/postings";
+import { analyzeFlow, headlineDisplay } from "@/api/postings";
 import type { Occurrence, Schedule } from "@/api/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -152,8 +152,7 @@ function HistoryRow({
   const [editOpen, setEditOpen] = useState(false);
   const name = schedule?.name ?? `Schedule ${occurrence.schedule_id}`;
   const flow = analyzeFlow(schedule?.postings, occurrence.override_amounts);
-  const amount = flow.amount ?? schedule?.headline_amount ?? "";
-  const currency = flow.currency ?? schedule?.headline_currency ?? undefined;
+  const { amount = "", currency } = headlineDisplay(flow, schedule);
   const effectiveDate = occurrence.override_date ?? occurrence.due_date;
   const file = writtenFile(occurrence.written_path, ledgerRoot);
   const confirmed = occurrence.status === "confirmed";

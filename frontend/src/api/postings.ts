@@ -1,4 +1,4 @@
-import type { Posting } from "./types";
+import type { Posting, Schedule } from "./types";
 
 export interface FlowLeg {
   posting: Posting;
@@ -10,8 +10,8 @@ export interface FlowLeg {
 export interface PostingFlow {
   sources: FlowLeg[];
   destinations: FlowLeg[];
-  /** Headline amount (absolute value). Undefined when not computable — callers
-   *  fall back to schedule.headline_amount / headline_currency. */
+  /** Headline amount (absolute value). Undefined when not computable —
+   *  headlineDisplay() resolves the schedule fallback for display. */
   amount?: string;
   currency?: string;
 }
@@ -47,7 +47,6 @@ export function analyzeFlow(
     };
   }
 
-  if (legs.length === 0) return fallback();
   if (legs.some((p) => p.cost != null || p.price != null)) return fallback();
 
   const raws = legs.map((posting) => ({
@@ -84,6 +83,19 @@ export function analyzeFlow(
     destinations: flowLegs.filter((l) => l.amount! >= 0),
     amount: String(clean(headline)),
     currency: [...currencies][0],
+  };
+}
+
+/** Display amount/currency for a flow: the computed net, or the schedule's
+ *  backend headline when the flow isn't computable. Undefined when neither
+ *  source knows. */
+export function headlineDisplay(
+  flow: PostingFlow,
+  schedule?: Schedule
+): { amount?: string; currency?: string } {
+  return {
+    amount: flow.amount ?? schedule?.headline_amount ?? undefined,
+    currency: flow.currency ?? schedule?.headline_currency ?? undefined,
   };
 }
 
