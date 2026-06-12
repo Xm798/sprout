@@ -33,7 +33,7 @@
   "inbox": {
     "title": "收件箱",
     "subtitle": "查看并确认到期的款项。",
-    "dueCount_other": "{{count}} 笔到期",
+    "dueCount": "{{count}} 笔到期",
     "confirmAll": "全部确认",
     "confirmingCount_other": "正在确认 {{count}} 笔事项",
     "loadFailed": "收件箱加载失败，请检查 API 是否可达。",
@@ -77,7 +77,6 @@
     "readdFailedToast": "无法重新写入 {{name}}",
     "unskippedToast": "{{name}} 已回到收件箱",
     "unskipFailedToast": "无法取消跳过 {{name}}",
-    "dialogTitle": "在收件箱中编辑",
     "dialogBody": "这会删除下方的交易，并将该事项退回收件箱。",
     "dialogBodyWithFile": "这会从 <mono>{{file}}</mono> 中删除下方的交易，并将该事项退回收件箱。",
     "loadingTransaction": "正在加载交易…",

@@ -1,5 +1,5 @@
 import "@testing-library/jest-dom/vitest";
-import { vi } from "vitest";
+import { afterEach, vi } from "vitest";
 import i18n from "@/i18n";
 
 // jsdom lacks these APIs that Radix primitives and next-themes rely on.
@@ -28,5 +28,10 @@ if (!Element.prototype.scrollIntoView) {
   Element.prototype.scrollIntoView = vi.fn();
 }
 
-// Tests assert English copy; pin the language regardless of host/browser env.
+// Tests assert English copy; pin the language regardless of host/browser env,
+// and undo any per-test language switch or storage writes.
 await i18n.changeLanguage("en");
+afterEach(async () => {
+  await i18n.changeLanguage("en");
+  localStorage.clear();
+});

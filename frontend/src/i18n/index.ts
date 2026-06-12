@@ -5,7 +5,7 @@ import { initReactI18next } from "react-i18next";
 import en from "./locales/en.json";
 import zhCN from "./locales/zh-CN.json";
 
-export const resources = {
+const resources = {
   en: { translation: en },
   "zh-CN": { translation: zhCN },
 } as const;

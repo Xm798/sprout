@@ -1,9 +1,5 @@
 import i18n, { normalizeDetectedLanguage } from "@/i18n";
 
-afterEach(async () => {
-  await i18n.changeLanguage("en");
-});
-
 test("resolves English with the full dictionary loaded", () => {
   expect(i18n.resolvedLanguage).toBe("en");
   expect(i18n.t("nav.inbox")).toBe("Inbox");

@@ -3,10 +3,6 @@ import { render, screen } from "@testing-library/react";
 import { DatePicker } from "@/components/ui/date-picker";
 import i18n from "@/i18n";
 
-afterEach(async () => {
-  await i18n.changeLanguage("en");
-});
-
 test("formats the selected date with the active app language", async () => {
   const { rerender } = render(
     <DatePicker value="2026-01-15" onChange={() => {}} />

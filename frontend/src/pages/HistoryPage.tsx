@@ -96,7 +96,7 @@ function EditInInboxDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{t("history.dialogTitle")}</DialogTitle>
+          <DialogTitle>{t("history.editInInbox")}</DialogTitle>
           <DialogDescription>
             {file ? (
               <Trans

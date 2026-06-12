@@ -2,13 +2,7 @@ import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import App from "@/App";
-import i18n from "@/i18n";
 import { renderWithProviders } from "@/test/utils";
-
-afterEach(async () => {
-  await i18n.changeLanguage("en");
-  localStorage.clear();
-});
 
 test("switches UI language and persists the choice", async () => {
   const user = userEvent.setup();

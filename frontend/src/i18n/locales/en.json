@@ -33,8 +33,7 @@
   "inbox": {
     "title": "Inbox",
     "subtitle": "Review and confirm what's due.",
-    "dueCount_one": "{{count}} due",
-    "dueCount_other": "{{count}} due",
+    "dueCount": "{{count}} due",
     "confirmAll": "Confirm all",
     "confirmingCount_one": "Confirming {{count}} occurrence",
     "confirmingCount_other": "Confirming {{count}} occurrences",
@@ -80,7 +79,6 @@
     "readdFailedToast": "Couldn't re-add {{name}}",
     "unskippedToast": "{{name}} is back in the inbox",
     "unskipFailedToast": "Couldn't unskip {{name}}",
-    "dialogTitle": "Edit in inbox",
     "dialogBody": "This deletes the transaction below and returns the occurrence to the inbox.",
     "dialogBodyWithFile": "This deletes the transaction below from <mono>{{file}}</mono> and returns the occurrence to the inbox.",
     "loadingTransaction": "Loading transaction…",
