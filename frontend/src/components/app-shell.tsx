@@ -1,19 +1,22 @@
 import { History, Inbox, Repeat, Settings } from "lucide-react";
 import { NavLink } from "react-router-dom";
 import type { ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 
+import { LangToggle } from "@/components/lang-toggle";
 import { ModeToggle } from "@/components/mode-toggle";
 import { SproutMark } from "@/components/logo";
 import { cn } from "@/lib/utils";
 
 const NAV = [
-  { to: "/", label: "Inbox", icon: Inbox, end: true },
-  { to: "/history", label: "History", icon: History, end: false },
-  { to: "/schedules", label: "Schedules", icon: Repeat, end: false },
-  { to: "/settings", label: "Settings", icon: Settings, end: false },
-];
+  { to: "/", labelKey: "nav.inbox", icon: Inbox, end: true },
+  { to: "/history", labelKey: "nav.history", icon: History, end: false },
+  { to: "/schedules", labelKey: "nav.schedules", icon: Repeat, end: false },
+  { to: "/settings", labelKey: "nav.settings", icon: Settings, end: false },
+] as const;
 
 export function AppShell({ children }: { children: ReactNode }) {
+  const { t } = useTranslation();
   return (
     <div className="min-h-screen">
       {/*
@@ -45,7 +48,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               "md:static md:flex md:items-center md:gap-1 md:border-0 md:bg-transparent md:p-0 md:backdrop-blur-none"
             )}
           >
-            {NAV.map(({ to, label, icon: Icon, end }) => (
+            {NAV.map(({ to, labelKey, icon: Icon, end }) => (
               <NavLink
                 key={to}
                 to={to}
@@ -70,14 +73,17 @@ export function AppShell({ children }: { children: ReactNode }) {
                     >
                       <Icon className="h-[1.15rem] w-[1.15rem] md:h-4 md:w-4" />
                     </span>
-                    {label}
+                    {t(labelKey)}
                   </>
                 )}
               </NavLink>
             ))}
           </nav>
 
-          <ModeToggle />
+          <div className="flex items-center">
+            <LangToggle />
+            <ModeToggle />
+          </div>
         </div>
       </header>
 
