@@ -1,0 +1,169 @@
+{
+  "nav": {
+    "inbox": "收件箱",
+    "history": "历史",
+    "schedules": "周期计划",
+    "settings": "设置"
+  },
+  "langToggle": {
+    "label": "切换语言"
+  },
+  "modeToggle": {
+    "label": "切换主题",
+    "light": "浅色",
+    "dark": "深色",
+    "system": "跟随系统"
+  },
+  "datePicker": {
+    "pickDate": "选择日期",
+    "today": "今天",
+    "clear": "清除"
+  },
+  "common": {
+    "loading": "加载中…",
+    "saving": "保存中…",
+    "cancel": "取消",
+    "scheduleFallback": "计划 {{id}}",
+    "status": {
+      "pending": "待处理",
+      "confirmed": "已确认",
+      "skipped": "已跳过"
+    }
+  },
+  "inbox": {
+    "title": "收件箱",
+    "subtitle": "查看并确认到期的款项。",
+    "dueCount_other": "{{count}} 笔到期",
+    "confirmAll": "全部确认",
+    "confirmingCount_other": "正在确认 {{count}} 笔事项",
+    "loadFailed": "收件箱加载失败，请检查 API 是否可达。",
+    "emptyTitle": "全部处理完毕",
+    "emptyBody": "目前没有到期款项。新的事项到期后会出现在这里。"
+  },
+  "inboxRow": {
+    "due": "到期 {{date}}",
+    "confirm": "确认",
+    "skip": "跳过",
+    "preview": "预览",
+    "hide": "收起",
+    "confirmedToast": "已确认 {{name}}",
+    "confirmFailedToast": "无法确认 {{name}}",
+    "skippedToast": "已跳过 {{name}}",
+    "amount": "金额",
+    "date": "日期",
+    "narration": "摘要",
+    "overrideDate": "覆盖日期",
+    "overrideNarration": "覆盖摘要",
+    "beancountPreview": "Beancount 预览",
+    "previewFailed": "预览渲染失败。"
+  },
+  "history": {
+    "title": "历史",
+    "subtitle": "已确认和已跳过的事项，并与账本核对。",
+    "missingCount_other": "{{count}} 笔已写入的交易在账本中缺失。",
+    "checkFailed": "账本核对失败：{{error}}",
+    "loadFailed": "历史记录加载失败，请检查 API 是否可达。",
+    "emptyTitle": "暂无历史记录",
+    "emptyBody": "在收件箱中确认或跳过的事项会显示在这里。",
+    "missingFromLedger": "账本中缺失",
+    "editInInbox": "在收件箱中编辑",
+    "readd": "重新写入",
+    "moveBackToInbox": "退回收件箱",
+    "unskip": "取消跳过",
+    "movedBackToast": "{{name}} 已退回收件箱",
+    "moveBackFailedToast": "无法将 {{name}} 退回收件箱",
+    "goToInbox": "前往收件箱",
+    "readdedToast": "已将 {{name}} 重新写入账本",
+    "readdFailedToast": "无法重新写入 {{name}}",
+    "unskippedToast": "{{name}} 已回到收件箱",
+    "unskipFailedToast": "无法取消跳过 {{name}}",
+    "dialogTitle": "在收件箱中编辑",
+    "dialogBody": "这会删除下方的交易，并将该事项退回收件箱。",
+    "dialogBodyWithFile": "这会从 <mono>{{file}}</mono> 中删除下方的交易，并将该事项退回收件箱。",
+    "loadingTransaction": "正在加载交易…",
+    "loadTransactionFailed": "交易加载失败：{{error}}",
+    "manualEditsWarning": "此文本中的任何手动修改都会被一并删除。收件箱会根据 Sprout 保存的计划和覆盖项重建交易，可能与此处显示的内容不同。",
+    "deleteAndMove": "删除并退回收件箱"
+  },
+  "schedules": {
+    "title": "周期计划",
+    "subtitle": "为收件箱供稿的周期付款。",
+    "newSchedule": "新建计划",
+    "dialogDescription": "定义一笔周期付款，到期后会出现在收件箱中。",
+    "sheetDescription": "定义一笔周期付款。",
+    "emptyTitle": "还没有计划",
+    "emptyBody": "创建你的第一笔周期付款吧。",
+    "deletedToast": "已删除 {{name}}",
+    "deleteAria": "删除 {{name}}",
+    "everyOne": {
+      "day": "每天",
+      "week": "每周",
+      "month": "每月",
+      "quarter": "每季度",
+      "year": "每年"
+    },
+    "everyMany": {
+      "day": "每 {{count}} 天",
+      "week": "每 {{count}} 周",
+      "month": "每 {{count}} 个月",
+      "quarter": "每 {{count}} 个季度",
+      "year": "每 {{count}} 年"
+    }
+  },
+  "scheduleForm": {
+    "name": "名称",
+    "namePlaceholder": "例如 Netflix",
+    "postings": "分录",
+    "addPosting": "添加分录",
+    "postingN": "分录 {{n}}",
+    "autoBalanceLeg": "自动平衡分录",
+    "removePostingN": "删除分录 {{n}}",
+    "accountN": "账户 {{n}}",
+    "accountPlaceholder": "Expenses:Subscriptions",
+    "amountN": "金额 {{n}}",
+    "amountPlaceholder": "金额（留空 = 自动平衡）",
+    "currencyN": "货币 {{n}}",
+    "narration": "摘要",
+    "narrationPlaceholder": "可选备注",
+    "repeatsEvery": "重复周期",
+    "repeatCount": "重复次数",
+    "repeatInterval": "重复间隔",
+    "unit": {
+      "day": "天",
+      "week": "周",
+      "month": "月",
+      "quarter": "季度",
+      "year": "年"
+    },
+    "startingFrom": "开始日期",
+    "targetFile": "目标文件",
+    "targetFilePlaceholder": "默认（全局写入模式）",
+    "newFileHint": "新文件 — 会自动创建并 include 进主账本。",
+    "createFailedToast": "无法创建计划",
+    "create": "创建计划"
+  },
+  "settings": {
+    "title": "设置",
+    "subtitle": "Sprout 写入 Beancount 交易的位置和方式。",
+    "ledger": "账本",
+    "ledgerDescription": "Sprout 读取和写入的路径。",
+    "ledgerMainFile": "账本主文件",
+    "ledgerRoot": "账本根目录",
+    "writeMode": "写入模式",
+    "writeModeDescription": "已确认的交易在磁盘上的组织方式。",
+    "mode": "模式",
+    "writeModeAria": "写入模式",
+    "singleFile": "单一文件",
+    "monthlyFiles": "按月分文件",
+    "singleFileName": "单一文件名",
+    "monthFileTemplate": "月度文件模板",
+    "defaults": "默认值",
+    "defaultTag": "默认标签",
+    "defaultCurrency": "默认货币",
+    "lookaheadDays": "提前提醒天数",
+    "savedToast": "设置已保存",
+    "saveFailedToast": "保存失败",
+    "save": "保存",
+    "saved": "已保存"
+  }
+}
