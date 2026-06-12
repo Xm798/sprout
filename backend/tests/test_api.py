@@ -76,8 +76,10 @@ def test_accounts_and_currencies(client):
 def test_get_and_update_config(client):
     cfg = client.get("/api/config").json()
     assert cfg["write_mode"] == "single_file"
-    r = client.put("/api/config", json={**cfg, "lookahead_days": 7})
+    assert cfg["default_currency"] == "USD"
+    r = client.put("/api/config", json={**cfg, "lookahead_days": 7, "default_currency": "CNY"})
     assert r.json()["lookahead_days"] == 7
+    assert r.json()["default_currency"] == "CNY"
 
 
 def test_preview_missing_occurrence_404(client):

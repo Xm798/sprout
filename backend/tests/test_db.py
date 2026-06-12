@@ -324,6 +324,23 @@ def test_migration_adds_target_file_column():
     migrate_legacy_schema(engine)
 
 
+def test_migration_adds_default_currency_column():
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
+    with engine.begin() as conn:
+        conn.execute(text(
+            "CREATE TABLE appconfig (id INTEGER PRIMARY KEY, ledger_main_file VARCHAR)"
+        ))
+        conn.execute(text("INSERT INTO appconfig (id, ledger_main_file) VALUES (1, '')"))
+    migrate_legacy_schema(engine)
+    cols = {c["name"] for c in inspect(engine).get_columns("appconfig")}
+    assert "default_currency" in cols
+    with engine.begin() as conn:
+        row = conn.execute(text("SELECT default_currency FROM appconfig WHERE id=1")).first()
+    assert row.default_currency == "USD"  # existing row backfilled with the default
+    # idempotent: second run must not raise
+    migrate_legacy_schema(engine)
+
+
 def test_schedule_model_has_target_file_default_none(session):
     from app.models import Schedule
     sch = Schedule(

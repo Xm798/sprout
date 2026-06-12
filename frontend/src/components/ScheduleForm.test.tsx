@@ -10,6 +10,8 @@ vi.mock("../api/client", () => ({
     accounts: vi.fn().mockResolvedValue(["Assets:CreditCard", "Expenses:Subscription"]),
     currencies: vi.fn().mockResolvedValue(["USD", "CNY"]),
     beanFiles: vi.fn().mockResolvedValue(["rent.bean", "loans/car.bean"]),
+    // ScheduleForm only reads default_currency off the config.
+    getConfig: vi.fn().mockResolvedValue({ id: 1, default_currency: "USD" }),
     createSchedule: vi.fn().mockResolvedValue({ id: 1 }),
   },
 }));

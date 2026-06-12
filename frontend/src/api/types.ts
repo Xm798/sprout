@@ -81,5 +81,6 @@ export interface AppConfig {
   single_file_name: string;
   month_file_template: string;
   default_tag: string;
+  default_currency: string;
   lookahead_days: number;
 }

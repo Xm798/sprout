@@ -1,9 +1,9 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
-import { useAccounts, useBeanFiles, useCreateSchedule, useCurrencies } from "@/api/hooks";
+import { useAccounts, useBeanFiles, useConfig, useCreateSchedule, useCurrencies } from "@/api/hooks";
 import type { IntervalUnit, Posting, ScheduleCreate } from "@/api/types";
 import { Button } from "@/components/ui/button";
 import { Combobox } from "@/components/ui/combobox";
@@ -33,12 +33,12 @@ type Draft = Omit<ScheduleCreate, "postings" | "target_file"> & {
   target_file: string;
 };
 
-function newLeg(currency = "USD"): DraftPosting {
+function newLeg(currency = ""): DraftPosting {
   return { id: crypto.randomUUID(), account: "", amount: "", currency };
 }
 
 // Default: an amount leg + an auto-balance leg — the old "from X to Y" model.
-function emptyDraft(): Draft {
+function emptyDraft(currency: string): Draft {
   return {
     name: "",
     narration: "",
@@ -50,7 +50,7 @@ function emptyDraft(): Draft {
     tags: "sprout",
     status: "active",
     target_file: "",
-    postings: [newLeg("USD"), newLeg("")],
+    postings: [newLeg(currency), newLeg("")],
   };
 }
 
@@ -68,7 +68,15 @@ function toPayload(draft: Draft): ScheduleCreate {
 const UNITS: IntervalUnit[] = ["day", "week", "month", "quarter", "year"];
 
 export function ScheduleForm({ onCreated }: { onCreated?: () => void }) {
-  const [draft, setDraft] = useState<Draft>(emptyDraft);
+  const config = useConfig();
+  const defaultCurrency = config.data?.default_currency || "USD";
+  const [draft, setDraft] = useState<Draft>(() => emptyDraft(defaultCurrency));
+  // The config arrives async; refresh the default currency on a form the user
+  // hasn't touched yet, without clobbering in-progress input.
+  const touched = useRef(false);
+  useEffect(() => {
+    if (!touched.current) setDraft(emptyDraft(defaultCurrency));
+  }, [defaultCurrency]);
   const accounts = useAccounts();
   const currencies = useCurrencies();
   const beanFiles = useBeanFiles();
@@ -84,10 +92,12 @@ export function ScheduleForm({ onCreated }: { onCreated?: () => void }) {
     !beanFileOptions.includes(targetFileValue);
 
   function set<K extends keyof Draft>(key: K, value: Draft[K]) {
+    touched.current = true;
     setDraft((d) => ({ ...d, [key]: value }));
   }
 
   function setLeg(id: string, patch: Partial<DraftPosting>) {
+    touched.current = true;
     setDraft((d) => ({
       ...d,
       postings: d.postings.map((p) => (p.id === id ? { ...p, ...patch } : p)),
@@ -95,7 +105,8 @@ export function ScheduleForm({ onCreated }: { onCreated?: () => void }) {
   }
 
   function addLeg() {
-    setDraft((d) => ({ ...d, postings: [...d.postings, newLeg("USD")] }));
+    touched.current = true;
+    setDraft((d) => ({ ...d, postings: [...d.postings, newLeg(defaultCurrency)] }));
   }
 
   function removeLeg(id: string) {
@@ -110,7 +121,8 @@ export function ScheduleForm({ onCreated }: { onCreated?: () => void }) {
     e.preventDefault();
     create.mutate(toPayload(draft), {
       onSuccess: () => {
-        setDraft(emptyDraft());
+        setDraft(emptyDraft(defaultCurrency));
+        touched.current = false;
         onCreated?.();
       },
       onError: (err) =>
@@ -196,7 +208,7 @@ export function ScheduleForm({ onCreated }: { onCreated?: () => void }) {
                   onChange={(v) => setLeg(leg.id, { currency: v })}
                   suggestions={currencyOptions}
                   transform={(v) => v.toUpperCase()}
-                  placeholder="USD"
+                  placeholder={defaultCurrency}
                 />
               </div>
             </div>

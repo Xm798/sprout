@@ -3,9 +3,10 @@ import type { FormEvent } from "react";
 import { Save } from "lucide-react";
 import { toast } from "sonner";
 
-import { useConfig, useUpdateConfig } from "@/api/hooks";
+import { useConfig, useCurrencies, useUpdateConfig } from "@/api/hooks";
 import type { AppConfig } from "@/api/types";
 import { Button } from "@/components/ui/button";
+import { Combobox } from "@/components/ui/combobox";
 import {
   Card,
   CardContent,
@@ -26,6 +27,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 
 export function SettingsPage() {
   const config = useConfig();
+  const currencies = useCurrencies();
   const update = useUpdateConfig();
   const [form, setForm] = useState<AppConfig | null>(null);
 
@@ -137,6 +139,17 @@ export function SettingsPage() {
                 value={form.default_tag}
                 onChange={(v) => set("default_tag", v)}
               />
+              <div className="space-y-1.5">
+                <Label htmlFor="default_currency">Default currency</Label>
+                <Combobox
+                  id="default_currency"
+                  value={form.default_currency}
+                  onChange={(v) => set("default_currency", v)}
+                  suggestions={currencies.data ?? []}
+                  transform={(v) => v.toUpperCase()}
+                  placeholder="USD"
+                />
+              </div>
               <div className="space-y-1.5">
                 <Label htmlFor="lookahead_days">Lookahead days</Label>
                 <Input
