@@ -3,8 +3,9 @@ import { CalendarPlus, Plus, Repeat, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { useDeleteSchedule, useSchedules } from "@/api/hooks";
-import { balanceLeg, headlineLeg } from "@/api/postings";
+import { analyzeFlow } from "@/api/postings";
 import type { Schedule } from "@/api/types";
+import { FlowAccounts } from "@/components/FlowAccounts";
 import { ScheduleForm } from "@/components/ScheduleForm";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -36,20 +37,11 @@ function intervalLabel(s: Schedule) {
     : `Every ${s.interval_count} ${unit}`;
 }
 
-// "Expenses:Sub → Assets:Bank": the headline (first amount-bearing) leg flowing
-// into the auto-balance leg. Falls back to listing accounts when no blank leg.
-function postingsSummary(s: Schedule): string {
-  const amountLeg = headlineLeg(s.postings);
-  const blankLeg = balanceLeg(s.postings);
-  if (amountLeg && blankLeg) return `${amountLeg.account} → ${blankLeg.account}`;
-  return s.postings
-    .map((p) => p.account)
-    .filter(Boolean)
-    .join(" · ");
-}
-
 function ScheduleCard({ schedule }: { schedule: Schedule }) {
   const del = useDeleteSchedule();
+  const flow = analyzeFlow(schedule.postings);
+  const amount = flow.amount ?? schedule.headline_amount;
+  const currency = flow.currency ?? schedule.headline_currency ?? undefined;
   return (
     <Card className="group transition-shadow hover:shadow-lift">
       <CardContent className="flex items-center justify-between gap-3 p-4 sm:p-5">
@@ -63,20 +55,15 @@ function ScheduleCard({ schedule }: { schedule: Schedule }) {
             </p>
             <div className="flex flex-wrap items-center gap-1.5">
               <Badge variant="outline">{intervalLabel(schedule)}</Badge>
-              <span className="truncate text-xs text-muted-foreground">
-                {postingsSummary(schedule)}
+              <span className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
+                <FlowAccounts flow={flow} leafNames={false} />
               </span>
             </div>
           </div>
         </div>
         <div className="flex shrink-0 flex-col items-end gap-1.5">
           <span className="font-mono text-sm font-semibold tabular-nums">
-            {schedule.headline_amount != null
-              ? formatAmount(
-                  schedule.headline_amount,
-                  schedule.headline_currency ?? undefined
-                )
-              : "—"}
+            {amount != null ? formatAmount(amount, currency) : "—"}
           </span>
           <Button
             variant="ghost"
