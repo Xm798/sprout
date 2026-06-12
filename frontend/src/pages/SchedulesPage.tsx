@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { CalendarPlus, Plus, Repeat, Trash2 } from "lucide-react";
+import { CalendarPlus, Pencil, Plus, Repeat, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { useDeleteSchedule, useSchedules } from "@/api/hooks";
@@ -50,6 +50,13 @@ function postingsSummary(s: Schedule): string {
 
 function ScheduleCard({ schedule }: { schedule: Schedule }) {
   const del = useDeleteSchedule();
+  const [editOpen, setEditOpen] = useState(false);
+  const isDesktop = useMediaQuery("(min-width: 768px)");
+
+  const editForm = (
+    <ScheduleForm schedule={schedule} onSaved={() => setEditOpen(false)} />
+  );
+
   return (
     <Card className="group transition-shadow hover:shadow-lift">
       <CardContent className="flex items-center justify-between gap-3 p-4 sm:p-5">
@@ -78,22 +85,63 @@ function ScheduleCard({ schedule }: { schedule: Schedule }) {
                 )
               : "—"}
           </span>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-8 w-8 text-muted-foreground hover:text-destructive"
-            aria-label={`Delete ${schedule.name}`}
-            disabled={del.isPending}
-            onClick={() =>
-              del.mutate(schedule.id, {
-                onSuccess: () => toast(`Deleted ${schedule.name}`),
-              })
-            }
-          >
-            <Trash2 className="h-4 w-4" />
-          </Button>
+          <div className="flex items-center gap-0.5">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 text-muted-foreground"
+              aria-label={`Edit ${schedule.name}`}
+              onClick={() => setEditOpen(true)}
+            >
+              <Pencil className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 text-muted-foreground hover:text-destructive"
+              aria-label={`Delete ${schedule.name}`}
+              disabled={del.isPending}
+              onClick={() =>
+                del.mutate(schedule.id, {
+                  onSuccess: () => toast(`Deleted ${schedule.name}`),
+                })
+              }
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          </div>
         </div>
       </CardContent>
+      {isDesktop ? (
+        <Dialog open={editOpen} onOpenChange={setEditOpen}>
+          <DialogContent className="max-h-[90vh] overflow-y-auto [scrollbar-gutter:stable]">
+            <DialogHeader>
+              <DialogTitle>Edit schedule</DialogTitle>
+              <DialogDescription>
+                Changes apply to upcoming occurrences; confirmed history stays
+                put.
+              </DialogDescription>
+            </DialogHeader>
+            {editForm}
+          </DialogContent>
+        </Dialog>
+      ) : (
+        <Sheet open={editOpen} onOpenChange={setEditOpen}>
+          <SheetContent
+            side="bottom"
+            className="max-h-[92vh] overflow-y-auto p-6 pb-8 [scrollbar-gutter:stable]"
+          >
+            <SheetHeader className="mb-4 text-left">
+              <SheetTitle>Edit schedule</SheetTitle>
+              <SheetDescription>
+                Changes apply to upcoming occurrences; confirmed history stays
+                put.
+              </SheetDescription>
+            </SheetHeader>
+            {editForm}
+          </SheetContent>
+        </Sheet>
+      )}
     </Card>
   );
 }
