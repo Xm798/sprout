@@ -31,6 +31,9 @@ def session():
         yield s
     if engine.dialect.name != "sqlite":
         SQLModel.metadata.drop_all(engine)
+    # Engines are per-test; without dispose, pooled Postgres connections
+    # accumulate across the suite and can exhaust max_connections.
+    engine.dispose()
 
 
 def new_schedule_payload(**over):

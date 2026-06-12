@@ -36,6 +36,7 @@ def client(tmp_path):
     app.dependency_overrides.clear()
     if engine.dialect.name != "sqlite":
         SQLModel.metadata.drop_all(engine)
+    engine.dispose()
 
 
 def _seeded_inbox(client) -> list[dict]:

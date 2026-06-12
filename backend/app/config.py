@@ -14,6 +14,7 @@ class AppConfig(SQLModel, table=True):
     single_file_name: str = "sprout.bean"
     month_file_template: str = "transactions/{year}/{year}-{month:02d}.bean"
     default_tag: str = "sprout"
+    default_currency: str = "USD"
     lookahead_days: int = 0
 
 
@@ -28,5 +29,6 @@ def config_from_env() -> AppConfig:
             "SPROUT_MONTH_FILE_TEMPLATE", "transactions/{year}/{year}-{month:02d}.bean"
         ),
         default_tag=os.getenv("SPROUT_DEFAULT_TAG", "sprout"),
+        default_currency=os.getenv("SPROUT_DEFAULT_CURRENCY", "USD"),
         lookahead_days=int(os.getenv("SPROUT_LOOKAHEAD_DAYS", "0")),
     )

@@ -149,11 +149,12 @@ def _migrate_occurrence(engine) -> None:
             conn.execute(text("ALTER TABLE occurrence DROP COLUMN override_amount"))
 
 
-def _add_target_file_column(engine) -> None:
-    sched_cols = _columns(engine, "schedule")
-    if sched_cols and "target_file" not in sched_cols:
+def _add_column_if_missing(engine, table: str, column: str, column_def: str) -> None:
+    """Idempotently add a column to an existing table (no-op if the table is absent)."""
+    cols = _columns(engine, table)
+    if cols and column not in cols:
         with engine.begin() as conn:
-            conn.execute(text("ALTER TABLE schedule ADD COLUMN target_file VARCHAR"))
+            conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {column_def}"))
 
 
 def migrate_legacy_schema(engine) -> None:
@@ -171,7 +172,10 @@ def migrate_legacy_schema(engine) -> None:
     occ_cols = _columns(engine, "occurrence")
     if occ_cols and "override_amount" in occ_cols:
         _migrate_occurrence(engine)
-    _add_target_file_column(engine)
+    _add_column_if_missing(engine, "schedule", "target_file", "VARCHAR")
+    _add_column_if_missing(
+        engine, "appconfig", "default_currency", "VARCHAR NOT NULL DEFAULT 'USD'"
+    )
 
 
 def init_db() -> None:

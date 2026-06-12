@@ -7,7 +7,8 @@ function Toaster(props: ToasterProps) {
   return (
     <Sonner
       theme={theme as ToasterProps["theme"]}
-      position="top-center"
+      position="bottom-center"
+      duration={2500}
       toastOptions={{
         classNames: {
           toast:

@@ -1,4 +1,5 @@
 import datetime
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -33,6 +34,19 @@ def client(tmp_path):
     app.dependency_overrides.clear()
     if engine.dialect.name != "sqlite":
         SQLModel.metadata.drop_all(engine)
+    engine.dispose()
+
+
+@contextmanager
+def _db_session():
+    """Session from the active get_session override, properly closed.
+    A bare `next(override())` leaks an open transaction whose table locks
+    deadlock the next test's drop_all on Postgres."""
+    gen = app.dependency_overrides[get_session]()
+    try:
+        yield next(gen)
+    finally:
+        gen.close()
 
 
 def test_create_and_list_schedules(client):
@@ -76,8 +90,10 @@ def test_accounts_and_currencies(client):
 def test_get_and_update_config(client):
     cfg = client.get("/api/config").json()
     assert cfg["write_mode"] == "single_file"
-    r = client.put("/api/config", json={**cfg, "lookahead_days": 7})
+    assert cfg["default_currency"] == "USD"
+    r = client.put("/api/config", json={**cfg, "lookahead_days": 7, "default_currency": "CNY"})
     assert r.json()["lookahead_days"] == 7
+    assert r.json()["default_currency"] == "CNY"
 
 
 def test_preview_missing_occurrence_404(client):
@@ -184,11 +200,11 @@ def _set_stored_override(occ_id: int, overrides: dict) -> None:
     """Write occ.override_amounts directly via the session, bypassing the API
     (which now rejects unknown keys) to simulate legacy/stale persisted data."""
     from app.models import Occurrence
-    session = next(app.dependency_overrides[get_session]())
-    occ = session.get(Occurrence, occ_id)
-    occ.override_amounts = overrides
-    session.add(occ)
-    session.commit()
+    with _db_session() as session:
+        occ = session.get(Occurrence, occ_id)
+        occ.override_amounts = overrides
+        session.add(occ)
+        session.commit()
 
 
 def test_get_preview_stale_stored_override_key_422(client):
@@ -231,10 +247,10 @@ def test_delete_schedule_removes_occurrences(client):
     inbox_after = client.get("/api/inbox").json()
     assert all(o["schedule_id"] != sid for o in inbox_after)
     # DB-level: no occurrence rows of ANY status survive
-    session = next(app.dependency_overrides[get_session]())
-    remaining = session.exec(
-        select(Occurrence).where(Occurrence.schedule_id == sid)
-    ).all()
+    with _db_session() as session:
+        remaining = session.exec(
+            select(Occurrence).where(Occurrence.schedule_id == sid)
+        ).all()
     assert remaining == []
 
 
@@ -247,12 +263,17 @@ def test_delete_missing_schedule_404(client):
 def _forge_orphan_occurrence(occ_id: int) -> None:
     """Delete the schedule row while leaving the occurrence row intact,
     simulating pre-fix data (or a non-cascade delete)."""
+    from sqlalchemy import text
     from app.models import Schedule
-    session = next(app.dependency_overrides[get_session]())
-    occ = session.get(Occurrence, occ_id)
-    sch = session.get(Schedule, occ.schedule_id)
-    session.delete(sch)
-    session.commit()
+    with _db_session() as session:
+        occ = session.get(Occurrence, occ_id)
+        sch = session.get(Schedule, occ.schedule_id)
+        if session.get_bind().dialect.name == "postgresql":
+            # Postgres enforces the schedule FK that SQLite leaves off; disable
+            # FK triggers for this transaction to forge the legacy orphan state.
+            session.execute(text("SET LOCAL session_replication_role = 'replica'"))
+        session.delete(sch)
+        session.commit()
 
 
 def test_get_preview_orphan_occurrence_404(client):

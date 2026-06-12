@@ -4,22 +4,21 @@ import { afterEach, expect, test, vi } from "vitest";
 import { SettingsPage } from "./SettingsPage";
 import { renderWithProviders } from "../test/utils";
 import { api } from "../api/client";
-vi.mock("../api/client", () => ({
-  api: {
-    getConfig: vi.fn().mockResolvedValue({
-      id: 1, ledger_main_file: "/l/main.bean", ledger_root: "/l",
-      write_mode: "single_file", single_file_name: "sprout.bean",
-      month_file_template: "transactions/{year}/{year}-{month:02d}.bean",
-      default_tag: "sprout", lookahead_days: 0,
-    }),
-    updateConfig: vi.fn().mockResolvedValue({
-      id: 1, ledger_main_file: "/l/main.bean", ledger_root: "/l",
-      write_mode: "single_file", single_file_name: "sprout.bean",
-      month_file_template: "transactions/{year}/{year}-{month:02d}.bean",
-      default_tag: "sprout", lookahead_days: 7,
-    }),
-  },
-}));
+vi.mock("../api/client", () => {
+  const config = {
+    id: 1, ledger_main_file: "/l/main.bean", ledger_root: "/l",
+    write_mode: "single_file", single_file_name: "sprout.bean",
+    month_file_template: "transactions/{year}/{year}-{month:02d}.bean",
+    default_tag: "sprout", default_currency: "USD", lookahead_days: 0,
+  };
+  return {
+    api: {
+      currencies: vi.fn().mockResolvedValue(["USD", "CNY"]),
+      getConfig: vi.fn().mockResolvedValue(config),
+      updateConfig: vi.fn().mockResolvedValue({ ...config, lookahead_days: 7 }),
+    },
+  };
+});
 
 afterEach(() => vi.clearAllMocks());
 
