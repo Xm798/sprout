@@ -136,7 +136,7 @@ def test_update_schedule_preserves_overrides_on_narration_edit(session, config, 
         interval_unit="month", interval_count=1,
         anchor_date=datetime.date(2026, 1, 15), max_count=6, tags="sprout",
     )
-    services.update_schedule(session, sch.id, payload)
+    services.update_schedule(session, config, sch.id, payload, today)
 
     session.refresh(occ)
     assert occ.override_amounts == {"main": "9.99"}
@@ -157,7 +157,7 @@ def test_update_schedule_clears_override_when_posting_account_changes(session, c
         interval_unit="month", interval_count=1,
         anchor_date=datetime.date(2026, 1, 15), max_count=6, tags="sprout",
     )
-    services.update_schedule(session, sch.id, payload)
+    services.update_schedule(session, config, sch.id, payload, today)
 
     session.refresh(occ)
     assert occ.override_amounts == {}
@@ -181,7 +181,7 @@ def test_update_schedule_partial_clear_keeps_unrelated_override(session, config,
     changed[1]["account"] = "Expenses:OtherFees"  # structural change to "extra" only
     payload = ScheduleCreate(name="Spotify", narration="sub", postings=changed, interval_unit="month",
                              interval_count=1, anchor_date=datetime.date(2026, 1, 15), max_count=6, tags="sprout")
-    services.update_schedule(session, sch.id, payload)
+    services.update_schedule(session, config, sch.id, payload, today)
     session.refresh(occ)
     assert occ.override_amounts == {"main": "9.99"}  # extra cleared, main kept
 
@@ -224,7 +224,7 @@ def test_update_schedule_clears_override_when_leg_flips_amount_to_blank(session,
         interval_unit="month", interval_count=1,
         anchor_date=datetime.date(2026, 1, 15), max_count=6, tags="sprout",
     )
-    services.update_schedule(session, sch.id, payload)
+    services.update_schedule(session, config, sch.id, payload, today)
 
     session.refresh(occ)
     # Override for "main" must be pruned because the leg is now blank
@@ -248,7 +248,7 @@ def test_update_schedule_clears_override_for_deleted_posting(session, config, to
     without_extra = [three[0], three[2]]  # drop "extra" entirely
     payload = ScheduleCreate(name="Spotify", narration="sub", postings=without_extra, interval_unit="month",
                              interval_count=1, anchor_date=datetime.date(2026, 1, 15), max_count=6, tags="sprout")
-    services.update_schedule(session, sch.id, payload)
+    services.update_schedule(session, config, sch.id, payload, today)
     session.refresh(occ)
     assert occ.override_amounts == {"main": "9.99"}  # deleted posting's override cleared
 
@@ -338,7 +338,7 @@ def test_update_schedule_prunes_stale_override_on_skipped_occurrence(session, co
         interval_unit="month", interval_count=1,
         anchor_date=datetime.date(2026, 1, 15), max_count=6, tags="sprout",
     )
-    services.update_schedule(session, sch.id, payload)
+    services.update_schedule(session, config, sch.id, payload, today)
 
     session.refresh(occ)
     assert occ.override_amounts == {}
@@ -362,7 +362,7 @@ def test_update_schedule_confirmed_occurrence_override_untouched(session, config
         interval_unit="month", interval_count=1,
         anchor_date=datetime.date(2026, 1, 15), max_count=6, tags="sprout",
     )
-    services.update_schedule(session, sch.id, payload)
+    services.update_schedule(session, config, sch.id, payload, today)
 
     session.refresh(occ)
     # Confirmed occurrence's override must remain intact
@@ -486,3 +486,65 @@ def test_confirm_rejects_target_file_escaping_root(session, tmp_ledger_config, t
         services.confirm_occurrence(session, tmp_ledger_config, occ.id)
     session.refresh(occ)
     assert occ.status == "pending"
+
+
+def test_update_schedule_deletes_stale_pendings_on_anchor_change(session, config, today):
+    sch = _make_schedule(session)
+    services.materialize_occurrences(session, config, today)
+
+    payload = ScheduleCreate(
+        name="Spotify", narration="sub", postings=_postings(),
+        interval_unit="month", interval_count=1,
+        anchor_date=datetime.date(2026, 1, 20), max_count=6, tags="sprout",
+    )
+    services.update_schedule(session, config, sch.id, payload, today)
+
+    remaining = session.exec(
+        sqlmodel.select(Occurrence).where(Occurrence.schedule_id == sch.id)
+    ).all()
+    # Old 15th-of-month pendings are stale under the new rule; the 20th-of-month
+    # ones materialize on the next inbox load, not here.
+    assert remaining == []
+
+
+def test_update_schedule_keeps_confirmed_and_skipped_on_anchor_change(session, config, today):
+    sch = _make_schedule(session)
+    services.materialize_occurrences(session, config, today)
+    occs = session.exec(
+        sqlmodel.select(Occurrence)
+        .where(Occurrence.schedule_id == sch.id)
+        .order_by(Occurrence.due_date)
+    ).all()
+    services.confirm_occurrence(session, config, occs[0].id)
+    services.skip_occurrence(session, occs[1].id)
+
+    payload = ScheduleCreate(
+        name="Spotify", narration="sub", postings=_postings(),
+        interval_unit="month", interval_count=1,
+        anchor_date=datetime.date(2026, 1, 20), max_count=6, tags="sprout",
+    )
+    services.update_schedule(session, config, sch.id, payload, today)
+
+    remaining = session.exec(
+        sqlmodel.select(Occurrence).where(Occurrence.schedule_id == sch.id)
+    ).all()
+    assert sorted(o.status for o in remaining) == ["confirmed", "skipped"]
+
+
+def test_update_schedule_same_rule_keeps_pendings(session, config, today):
+    sch = _make_schedule(session)
+    services.materialize_occurrences(session, config, today)
+
+    payload = ScheduleCreate(
+        name="Spotify", narration="renamed memo", postings=_postings(),
+        interval_unit="month", interval_count=1,
+        anchor_date=datetime.date(2026, 1, 15), max_count=6, tags="sprout",
+    )
+    services.update_schedule(session, config, sch.id, payload, today)
+
+    pendings = session.exec(
+        sqlmodel.select(Occurrence).where(
+            Occurrence.schedule_id == sch.id, Occurrence.status == "pending"
+        )
+    ).all()
+    assert len(pendings) == 5

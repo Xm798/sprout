@@ -1,3 +1,5 @@
+import datetime
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, select
 
@@ -58,7 +60,9 @@ def get_one(schedule_id: int, session: Session = Depends(get_session)) -> Schedu
 def update(schedule_id: int, payload: ScheduleCreate, session: Session = Depends(get_session)) -> ScheduleRead:
     _validate_or_422(payload, session)
     try:
-        sch = services.update_schedule(session, schedule_id, payload)
+        sch = services.update_schedule(
+            session, get_config(session), schedule_id, payload, datetime.date.today()
+        )
     except LookupError as exc:
         raise HTTPException(404, str(exc))
     return _read(sch)
