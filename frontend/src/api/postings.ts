@@ -1,4 +1,4 @@
-import type { Occurrence, Posting, Schedule } from "./types";
+import type { Posting } from "./types";
 
 export interface FlowLeg {
   posting: Posting;
@@ -87,31 +87,11 @@ export function analyzeFlow(
   };
 }
 
-// The multi-posting contract designates two legs by convention: the first
-// amount-bearing posting is the "headline" (list/summary display, the leg the
-// inbox tunes), and the first blank-amount posting is the auto-balance leg.
-// These helpers keep that convention in one place instead of re-deriving it.
+// Posting helpers. analyzeFlow() is the single source of truth for list/summary
+// display: flow grouping and the net headline amount. headlineLeg() remains the
+// convention for which leg the inbox amount editor tunes (first amount-bearing).
 
-/** First amount-bearing leg — the headline used for list/summary display. */
+/** First amount-bearing leg — the editable leg that the inbox amount editor tunes. */
 export function headlineLeg(postings?: Posting[]): Posting | undefined {
   return postings?.find((p) => p.amount != null);
-}
-
-/** First blank-amount leg — the auto-balance counter-leg. */
-export function balanceLeg(postings?: Posting[]): Posting | undefined {
-  return postings?.find((p) => p.amount == null);
-}
-
-/** Amount to show for an occurrence's headline leg: a per-leg override wins
- *  over the schedule's headline default. Undefined when neither is known. */
-export function effectiveHeadlineAmount(
-  occurrence: Occurrence,
-  schedule?: Schedule
-): string | undefined {
-  const leg = headlineLeg(schedule?.postings);
-  return (
-    (leg && occurrence.override_amounts[leg.id]) ??
-    schedule?.headline_amount ??
-    undefined
-  );
 }
