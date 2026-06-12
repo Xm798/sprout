@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
 import { Plus, Trash2 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 
 import { useAccounts, useBeanFiles, useCreateSchedule, useCurrencies } from "@/api/hooks";
@@ -68,6 +69,7 @@ function toPayload(draft: Draft): ScheduleCreate {
 const UNITS: IntervalUnit[] = ["day", "week", "month", "quarter", "year"];
 
 export function ScheduleForm({ onCreated }: { onCreated?: () => void }) {
+  const { t } = useTranslation();
   const [draft, setDraft] = useState<Draft>(emptyDraft);
   const accounts = useAccounts();
   const currencies = useCurrencies();
@@ -114,7 +116,7 @@ export function ScheduleForm({ onCreated }: { onCreated?: () => void }) {
         onCreated?.();
       },
       onError: (err) =>
-        toast.error("Couldn't create schedule", {
+        toast.error(t("scheduleForm.createFailedToast"), {
           description: errorMessage(err),
         }),
     });
@@ -123,11 +125,11 @@ export function ScheduleForm({ onCreated }: { onCreated?: () => void }) {
   return (
     <form onSubmit={submit} className="space-y-4">
       <div className="space-y-1.5">
-        <Label htmlFor="sf-name">Name</Label>
+        <Label htmlFor="sf-name">{t("scheduleForm.name")}</Label>
         <Input
           id="sf-name"
           required
-          placeholder="e.g. Netflix"
+          placeholder={t("scheduleForm.namePlaceholder")}
           value={draft.name}
           onChange={(e) => set("name", e.target.value)}
         />
@@ -135,10 +137,10 @@ export function ScheduleForm({ onCreated }: { onCreated?: () => void }) {
 
       <div className="space-y-2">
         <div className="flex items-center justify-between">
-          <Label>Postings</Label>
+          <Label>{t("scheduleForm.postings")}</Label>
           <Button type="button" variant="ghost" size="sm" onClick={addLeg}>
             <Plus className="h-4 w-4" />
-            Add posting
+            {t("scheduleForm.addPosting")}
           </Button>
         </div>
 
@@ -151,10 +153,10 @@ export function ScheduleForm({ onCreated }: { onCreated?: () => void }) {
             >
               <div className="flex items-center justify-between">
                 <Label htmlFor={`sf-account-${i}`} className="text-xs">
-                  Posting {i + 1}
+                  {t("scheduleForm.postingN", { n: i + 1 })}
                   {blank && (
                     <span className="ml-2 font-normal text-muted-foreground">
-                      auto-balance leg
+                      {t("scheduleForm.autoBalanceLeg")}
                     </span>
                   )}
                 </Label>
@@ -163,7 +165,7 @@ export function ScheduleForm({ onCreated }: { onCreated?: () => void }) {
                   variant="ghost"
                   size="icon"
                   className="h-7 w-7 text-muted-foreground hover:text-destructive"
-                  aria-label={`Remove posting ${i + 1}`}
+                  aria-label={t("scheduleForm.removePostingN", { n: i + 1 })}
                   disabled={draft.postings.length <= 2}
                   onClick={() => removeLeg(leg.id)}
                 >
@@ -173,25 +175,25 @@ export function ScheduleForm({ onCreated }: { onCreated?: () => void }) {
 
               <Combobox
                 id={`sf-account-${i}`}
-                aria-label={`Account ${i + 1}`}
+                aria-label={t("scheduleForm.accountN", { n: i + 1 })}
                 required
                 value={leg.account}
                 onChange={(v) => setLeg(leg.id, { account: v })}
                 suggestions={accountOptions}
-                placeholder="Expenses:Subscriptions"
+                placeholder={t("scheduleForm.accountPlaceholder")}
               />
 
               <div className="grid grid-cols-3 gap-2">
                 <Input
                   className="col-span-2"
-                  aria-label={`Amount ${i + 1}`}
+                  aria-label={t("scheduleForm.amountN", { n: i + 1 })}
                   inputMode="decimal"
-                  placeholder="Amount (blank = auto-balance)"
+                  placeholder={t("scheduleForm.amountPlaceholder")}
                   value={leg.amount}
                   onChange={(e) => setLeg(leg.id, { amount: e.target.value })}
                 />
                 <Combobox
-                  aria-label={`Currency ${i + 1}`}
+                  aria-label={t("scheduleForm.currencyN", { n: i + 1 })}
                   value={blank ? "" : leg.currency}
                   onChange={(v) => setLeg(leg.id, { currency: v })}
                   suggestions={currencyOptions}
@@ -205,20 +207,20 @@ export function ScheduleForm({ onCreated }: { onCreated?: () => void }) {
       </div>
 
       <div className="space-y-1.5">
-        <Label htmlFor="sf-narration">Narration</Label>
+        <Label htmlFor="sf-narration">{t("scheduleForm.narration")}</Label>
         <Input
           id="sf-narration"
-          placeholder="Optional memo"
+          placeholder={t("scheduleForm.narrationPlaceholder")}
           value={draft.narration}
           onChange={(e) => set("narration", e.target.value)}
         />
       </div>
 
       <div>
-        <Label>Repeats every</Label>
+        <Label>{t("scheduleForm.repeatsEvery")}</Label>
         <div className="mt-1.5 grid grid-cols-2 gap-3">
           <Input
-            aria-label="Repeat count"
+            aria-label={t("scheduleForm.repeatCount")}
             type="number"
             min={1}
             value={draft.interval_count}
@@ -228,13 +230,13 @@ export function ScheduleForm({ onCreated }: { onCreated?: () => void }) {
             value={draft.interval_unit}
             onValueChange={(v) => set("interval_unit", v as IntervalUnit)}
           >
-            <SelectTrigger aria-label="Repeat interval">
+            <SelectTrigger aria-label={t("scheduleForm.repeatInterval")}>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
               {UNITS.map((u) => (
-                <SelectItem key={u} value={u} className="capitalize">
-                  {u}
+                <SelectItem key={u} value={u}>
+                  {t(`scheduleForm.unit.${u}`)}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -243,35 +245,34 @@ export function ScheduleForm({ onCreated }: { onCreated?: () => void }) {
       </div>
 
       <div className="space-y-1.5">
-        <Label htmlFor="sf-anchor">Starting from</Label>
+        <Label htmlFor="sf-anchor">{t("scheduleForm.startingFrom")}</Label>
         <DatePicker
           id="sf-anchor"
-          aria-label="Starting from"
+          aria-label={t("scheduleForm.startingFrom")}
           value={draft.anchor_date}
           onChange={(v) => set("anchor_date", v)}
         />
       </div>
 
       <div className="space-y-1.5">
-        <Label htmlFor="sf-target-file">Target file</Label>
+        <Label htmlFor="sf-target-file">{t("scheduleForm.targetFile")}</Label>
         <Combobox
           id="sf-target-file"
-          aria-label="Target file"
+          aria-label={t("scheduleForm.targetFile")}
           value={draft.target_file}
           onChange={(v) => set("target_file", v)}
           suggestions={beanFileOptions}
-          placeholder="Default (global write mode)"
+          placeholder={t("scheduleForm.targetFilePlaceholder")}
         />
         {isNewFile && (
           <p className="text-xs text-muted-foreground">
-            New file — it will be created and included in the main ledger
-            automatically.
+            {t("scheduleForm.newFileHint")}
           </p>
         )}
       </div>
 
       <Button type="submit" disabled={create.isPending} className="w-full">
-        {create.isPending ? "Saving…" : "Create schedule"}
+        {create.isPending ? t("common.saving") : t("scheduleForm.create")}
       </Button>
     </form>
   );
