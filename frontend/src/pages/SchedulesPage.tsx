@@ -111,7 +111,7 @@ export function SchedulesPage() {
     </Button>
   );
 
-  const form = <ScheduleForm onCreated={() => setOpen(false)} />;
+  const form = <ScheduleForm onSaved={() => setOpen(false)} />;
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">

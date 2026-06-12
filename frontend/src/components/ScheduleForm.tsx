@@ -3,8 +3,15 @@ import type { FormEvent } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
-import { useAccounts, useBeanFiles, useConfig, useCreateSchedule, useCurrencies } from "@/api/hooks";
-import type { IntervalUnit, Posting, ScheduleCreate } from "@/api/types";
+import {
+  useAccounts,
+  useBeanFiles,
+  useConfig,
+  useCreateSchedule,
+  useCurrencies,
+  useUpdateSchedule,
+} from "@/api/hooks";
+import type { IntervalUnit, Posting, Schedule, ScheduleCreate } from "@/api/types";
 import { Button } from "@/components/ui/button";
 import { Combobox } from "@/components/ui/combobox";
 import { DatePicker } from "@/components/ui/date-picker";
@@ -54,6 +61,29 @@ function emptyDraft(currency: string): Draft {
   };
 }
 
+// Map a stored schedule back into the editable draft shape. Posting ids are
+// preserved so the backend can keep per-leg overrides on untouched legs.
+function scheduleToDraft(s: Schedule): Draft {
+  return {
+    name: s.name,
+    narration: s.narration,
+    interval_unit: s.interval_unit,
+    interval_count: s.interval_count,
+    anchor_date: s.anchor_date,
+    end_date: s.end_date ?? null,
+    max_count: s.max_count ?? null,
+    tags: s.tags,
+    status: s.status,
+    target_file: s.target_file ?? "",
+    postings: s.postings.map((p) => ({
+      id: p.id,
+      account: p.account,
+      amount: p.amount ?? "",
+      currency: p.currency ?? "",
+    })),
+  };
+}
+
 function toPayload(draft: Draft): ScheduleCreate {
   const postings: Posting[] = draft.postings.map((p) => {
     const amount = p.amount.trim();
@@ -67,20 +97,30 @@ function toPayload(draft: Draft): ScheduleCreate {
 
 const UNITS: IntervalUnit[] = ["day", "week", "month", "quarter", "year"];
 
-export function ScheduleForm({ onCreated }: { onCreated?: () => void }) {
+export function ScheduleForm({
+  schedule,
+  onSaved,
+}: {
+  schedule?: Schedule; // present = edit mode
+  onSaved?: () => void;
+}) {
   const config = useConfig();
   const defaultCurrency = config.data?.default_currency || "USD";
-  const [draft, setDraft] = useState<Draft>(() => emptyDraft(defaultCurrency));
+  const [draft, setDraft] = useState<Draft>(() =>
+    schedule ? scheduleToDraft(schedule) : emptyDraft(defaultCurrency)
+  );
   // The config arrives async; refresh the default currency on a form the user
-  // hasn't touched yet, without clobbering in-progress input.
+  // hasn't touched yet, without clobbering in-progress input or a prefilled edit.
   const touched = useRef(false);
   useEffect(() => {
-    if (!touched.current) setDraft(emptyDraft(defaultCurrency));
-  }, [defaultCurrency]);
+    if (!schedule && !touched.current) setDraft(emptyDraft(defaultCurrency));
+  }, [defaultCurrency, schedule]);
   const accounts = useAccounts();
   const currencies = useCurrencies();
   const beanFiles = useBeanFiles();
   const create = useCreateSchedule();
+  const update = useUpdateSchedule();
+  const saving = create.isPending || update.isPending;
 
   const accountOptions = accounts.data ?? [];
   const currencyOptions = currencies.data ?? [];
@@ -119,11 +159,24 @@ export function ScheduleForm({ onCreated }: { onCreated?: () => void }) {
 
   function submit(e: FormEvent) {
     e.preventDefault();
+    if (schedule) {
+      update.mutate(
+        { id: schedule.id, body: toPayload(draft) },
+        {
+          onSuccess: () => onSaved?.(),
+          onError: (err) =>
+            toast.error("Couldn't update schedule", {
+              description: errorMessage(err),
+            }),
+        }
+      );
+      return;
+    }
     create.mutate(toPayload(draft), {
       onSuccess: () => {
         setDraft(emptyDraft(defaultCurrency));
         touched.current = false;
-        onCreated?.();
+        onSaved?.();
       },
       onError: (err) =>
         toast.error("Couldn't create schedule", {
@@ -282,8 +335,8 @@ export function ScheduleForm({ onCreated }: { onCreated?: () => void }) {
         )}
       </div>
 
-      <Button type="submit" disabled={create.isPending} className="w-full">
-        {create.isPending ? "Saving…" : "Create schedule"}
+      <Button type="submit" disabled={saving} className="w-full">
+        {saving ? "Saving…" : schedule ? "Save changes" : "Create schedule"}
       </Button>
     </form>
   );

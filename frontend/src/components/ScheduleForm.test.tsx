@@ -4,6 +4,7 @@ import { afterEach, expect, test, vi } from "vitest";
 import { ScheduleForm } from "./ScheduleForm";
 import { renderWithProviders } from "../test/utils";
 import { api } from "../api/client";
+import type { Posting, Schedule } from "../api/types";
 
 vi.mock("../api/client", () => ({
   api: {
@@ -13,6 +14,7 @@ vi.mock("../api/client", () => ({
     // ScheduleForm only reads default_currency off the config.
     getConfig: vi.fn().mockResolvedValue({ id: 1, default_currency: "USD" }),
     createSchedule: vi.fn().mockResolvedValue({ id: 1 }),
+    updateSchedule: vi.fn().mockResolvedValue({ id: 7 }),
   },
 }));
 
@@ -135,4 +137,49 @@ test("adds and removes posting rows down to a floor of two", async () => {
 
   await user.click(screen.getByLabelText(/remove posting 3/i));
   expect(screen.queryByLabelText(/account 3/i)).not.toBeInTheDocument();
+});
+
+const existing: Schedule = {
+  id: 7,
+  name: "Spotify",
+  narration: "sub",
+  interval_unit: "month",
+  interval_count: 1,
+  anchor_date: "2026-01-15",
+  end_date: null,
+  max_count: 6,
+  tags: "sprout",
+  status: "active",
+  target_file: null,
+  postings: [
+    { id: "main", account: "Expenses:Subscription", amount: "15.00", currency: "USD" },
+    { id: "bal", account: "Assets:CreditCard", amount: null, currency: null },
+  ],
+  headline_amount: "15.00",
+  headline_currency: "USD",
+  created_at: "2026-01-01T00:00:00",
+  updated_at: "2026-01-01T00:00:00",
+};
+
+test("edit mode prefills fields and PUTs with preserved posting ids", async () => {
+  const user = userEvent.setup();
+  renderWithProviders(<ScheduleForm schedule={existing} />);
+
+  const name = screen.getByLabelText(/^name$/i);
+  expect(name).toHaveValue("Spotify");
+  expect(screen.getByLabelText(/amount 1/i)).toHaveValue("15.00");
+  expect(screen.getByLabelText(/account 2/i)).toHaveValue("Assets:CreditCard");
+
+  await user.clear(name);
+  await user.type(name, "Spotify Family");
+  await user.click(screen.getByRole("button", { name: /save changes/i }));
+
+  await waitFor(() => expect(api.updateSchedule).toHaveBeenCalledTimes(1));
+  expect(api.createSchedule).not.toHaveBeenCalled();
+  const [id, body] = (api.updateSchedule as ReturnType<typeof vi.fn>).mock.calls[0];
+  expect(id).toBe(7);
+  expect(body.name).toBe("Spotify Family");
+  // Stored posting ids must survive the round-trip so the backend keeps
+  // per-leg overrides on untouched legs.
+  expect(body.postings.map((p: Posting) => p.id)).toEqual(["main", "bal"]);
 });
