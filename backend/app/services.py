@@ -95,6 +95,29 @@ def _validate_effective(postings: list[Posting], merged: dict) -> list[Posting]:
     return effective
 
 
+def _get_occurrence(session: Session, occurrence_id: int, status: str) -> Occurrence:
+    """Fetch an occurrence that must currently be in `status` (LookupError /
+    ConflictError otherwise) — the shared precondition of every history action."""
+    occ = session.get(Occurrence, occurrence_id)
+    if occ is None:
+        raise LookupError(f"occurrence {occurrence_id} not found")
+    if occ.status != status:
+        raise ConflictError(f"occurrence {occurrence_id} is {occ.status}, not {status}")
+    return occ
+
+
+def _id_in_target_file(path: Path, sprout_id: Optional[str]) -> bool:
+    """Whether the target file textually contains this occurrence's id.
+
+    Matches the exact metadata line bean_format writes — a bare substring test
+    could hit comments or ids sharing a prefix (sch1- vs sch11-). This is the
+    duplicate-write guard shared by confirm and re-add: the include-tree scan
+    cannot see files the main ledger doesn't include, so a surviving copy in
+    an orphaned (or any) target file is only caught here.
+    """
+    return bool(sprout_id) and path.exists() and f'sprout-id: "{sprout_id}"' in path.read_text()
+
+
 def render_occurrence(
     occ: Occurrence, sch: Schedule, *,
     effective_postings: list[Posting],
@@ -188,11 +211,11 @@ def confirm_occurrence(
 
     eff_date, _narration = _effective_meta(occ, sch)
     path = target_path(config, eff_date, target_file=tf)
-    # Same duplicate-write guard as re-add: a copy of this id surviving in the
-    # target file (e.g. orphaned by a lost include, then unconfirmed as
-    # "missing") must not be silently duplicated by a re-confirm. Checked
-    # before ensure_included so a refused confirm leaves no side effects.
-    if occ.sprout_id and path.exists() and f'sprout-id: "{occ.sprout_id}"' in path.read_text():
+    # A copy of this id surviving in the target file (e.g. orphaned by a lost
+    # include, then unconfirmed as "missing") must not be silently duplicated
+    # by a re-confirm. Checked before ensure_included so a refused confirm
+    # leaves no side effects.
+    if _id_in_target_file(path, occ.sprout_id):
         raise ConflictError(
             f"transaction {occ.sprout_id} already exists in {path} — remove it "
             "or fix your include directives before confirming again"
@@ -246,11 +269,7 @@ def readd_occurrence(session: Session, config: AppConfig, occurrence_id: int) ->
     """Re-append a confirmed occurrence whose written transaction vanished from
     the ledger. Renders from current schedule + stored overrides (the original
     text is not stored), same as confirm."""
-    occ = session.get(Occurrence, occurrence_id)
-    if occ is None:
-        raise LookupError(f"occurrence {occurrence_id} not found")
-    if occ.status != "confirmed":
-        raise ConflictError(f"occurrence {occurrence_id} is {occ.status}, not confirmed")
+    occ = _get_occurrence(session, occurrence_id, "confirmed")
     if not occ.sprout_id:
         raise ValueError(f"occurrence {occurrence_id} has no sprout-id; cannot reconcile")
     sch = session.get(Schedule, occ.schedule_id)
@@ -272,12 +291,7 @@ def readd_occurrence(session: Session, config: AppConfig, occurrence_id: int) ->
 
     eff_date, _narration = _effective_meta(occ, sch)
     path = target_path(config, eff_date, target_file=tf)
-    # The include-tree scan above cannot see files the main ledger doesn't
-    # include; a direct check on the target file prevents double-appending when
-    # the user's `include` line is missing.
-    # Match the exact metadata line bean_format writes — a bare substring test
-    # could hit comments or ids sharing a prefix (sch1- vs sch11-).
-    if path.exists() and f'sprout-id: "{occ.sprout_id}"' in path.read_text():
+    if _id_in_target_file(path, occ.sprout_id):
         raise ConflictError(
             f"transaction {occ.sprout_id} already exists in {path} but is not "
             "reachable from the main ledger — check your include directives"
@@ -301,11 +315,7 @@ def readd_occurrence(session: Session, config: AppConfig, occurrence_id: int) ->
 def get_written_transaction(session: Session, config: AppConfig, occurrence_id: int) -> tuple[str, str]:
     """``(path, text)`` of a confirmed occurrence's transaction — the exact
     block as it exists in the ledger right now, including any manual edits."""
-    occ = session.get(Occurrence, occurrence_id)
-    if occ is None:
-        raise LookupError(f"occurrence {occurrence_id} not found")
-    if occ.status != "confirmed":
-        raise ConflictError(f"occurrence {occurrence_id} is {occ.status}, not confirmed")
+    occ = _get_occurrence(session, occurrence_id, "confirmed")
     if not occ.sprout_id:
         raise ValueError(f"occurrence {occurrence_id} has no sprout-id; cannot locate it")
     located = find_transaction(config.ledger_main_file, occ.sprout_id)
@@ -324,11 +334,7 @@ def unconfirm_occurrence(session: Session, config: AppConfig, occurrence_id: int
     reverts. Overrides and sprout_id survive so a re-confirm writes the same
     id — minus override keys stale against the current schedule postings,
     which would otherwise 422 every preview until the schedule is edited."""
-    occ = session.get(Occurrence, occurrence_id)
-    if occ is None:
-        raise LookupError(f"occurrence {occurrence_id} not found")
-    if occ.status != "confirmed":
-        raise ConflictError(f"occurrence {occurrence_id} is {occ.status}, not confirmed")
+    occ = _get_occurrence(session, occurrence_id, "confirmed")
     sch = session.get(Schedule, occ.schedule_id)
     if sch is None:
         raise LookupError(f"schedule {occ.schedule_id} not found")
@@ -376,11 +382,7 @@ def unconfirm_occurrence(session: Session, config: AppConfig, occurrence_id: int
 
 
 def unskip_occurrence(session: Session, occurrence_id: int) -> Occurrence:
-    occ = session.get(Occurrence, occurrence_id)
-    if occ is None:
-        raise LookupError(f"occurrence {occurrence_id} not found")
-    if occ.status != "skipped":
-        raise ConflictError(f"occurrence {occurrence_id} is {occ.status}, not skipped")
+    occ = _get_occurrence(session, occurrence_id, "skipped")
     occ.status = "pending"
     session.add(occ)
     session.commit()
