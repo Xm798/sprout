@@ -1,5 +1,8 @@
 import os
 
+import pytest
+
+from app.ledger import ConflictError, find_transaction
 from app.ledger import load_accounts, load_currencies
 from app.ledger import validate_snippet
 from app.ledger import included_files
@@ -83,3 +86,51 @@ def test_included_files_tolerates_missing_include(tmp_path):
     main.write_text('include "ghost/*.bean"\n')
     files = included_files(str(main))
     assert os.path.realpath(str(main)) in files
+
+
+# ── find_transaction ───────────────────────────────────────────────────────────
+
+TXN = (
+    '2026-01-15 * "Spotify" "sub" #sprout\n'
+    '  sprout-id: "sch1-20260115"\n'
+    "  Expenses:Subscription  15.00 USD\n"
+    "  Assets:CreditCard\n"
+)
+
+
+def _tree(tmp_path):
+    sub = tmp_path / "sub.bean"
+    sub.write_text("\n" + TXN)
+    main = tmp_path / "main.bean"
+    main.write_text(
+        "2020-01-01 open Assets:CreditCard\n"
+        "2020-01-01 open Expenses:Subscription\n"
+        'include "sub.bean"\n'
+    )
+    return main, sub
+
+
+def test_find_transaction_reports_file_and_header_line(tmp_path):
+    main, sub = _tree(tmp_path)
+    path, lineno = find_transaction(str(main), "sch1-20260115")
+    assert os.path.realpath(path) == os.path.realpath(str(sub))
+    assert lineno == 2  # 1-based header line, after the leading blank
+
+
+def test_find_transaction_absent_returns_none(tmp_path):
+    main, _sub = _tree(tmp_path)
+    assert find_transaction(str(main), "sch9-19990101") is None
+
+
+def test_find_transaction_missing_main_raises(tmp_path):
+    with pytest.raises(FileNotFoundError):
+        find_transaction(str(tmp_path / "nope.bean"), "x")
+    with pytest.raises(FileNotFoundError):
+        find_transaction("", "x")
+
+
+def test_find_transaction_duplicate_id_conflict(tmp_path):
+    main, sub = _tree(tmp_path)
+    sub.write_text(sub.read_text() + "\n" + TXN.replace("2026-01-15", "2026-02-15"))
+    with pytest.raises(ConflictError):
+        find_transaction(str(main), "sch1-20260115")

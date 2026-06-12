@@ -6,6 +6,7 @@ import type {
   PreviewBody,
   Schedule,
   ScheduleCreate,
+  WrittenTransaction,
 } from "./types";
 
 const BASE = "/api";
@@ -69,6 +70,13 @@ export const api = {
   checkHistory: () => http<HistoryCheck>("/history/check"),
   readd: (id: number) =>
     http<Occurrence>(`/history/${id}/readd`, { method: "POST" }),
+  // The written block as it exists in the ledger, for the unconfirm dialog.
+  getWritten: (id: number) =>
+    http<WrittenTransaction>(`/history/${id}/written`),
+  unconfirm: (id: number) =>
+    http<Occurrence>(`/history/${id}/unconfirm`, { method: "POST" }),
+  unskip: (id: number) =>
+    http<Occurrence>(`/history/${id}/unskip`, { method: "POST" }),
 
   accounts: () => http<string[]>("/accounts"),
   currencies: () => http<string[]>("/currencies"),

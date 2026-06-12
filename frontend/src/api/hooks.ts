@@ -12,6 +12,8 @@ export const qk = {
   config: ["config"] as const,
   beanFiles: ["bean-files"] as const,
   preview: (id: number, body: PreviewBody) => ["preview", id, body] as const,
+  // Under the "history" prefix so history-wide invalidation refreshes it too.
+  written: (id: number) => ["history", id, "written"] as const,
 };
 
 export function useSchedules() {
@@ -99,6 +101,43 @@ export function useReadd() {
     },
     // A 409 means the ledger changed under us — refresh the check too.
     onError: () => qc.invalidateQueries({ queryKey: qk.historyCheck }),
+  });
+}
+
+export function useWritten(id: number, enabled: boolean) {
+  // 409 (state changed under the dialog) is deterministic — don't retry it.
+  return useQuery({
+    queryKey: qk.written(id),
+    queryFn: () => api.getWritten(id),
+    enabled,
+    retry: false,
+  });
+}
+
+export function useUnconfirm() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => api.unconfirm(id),
+    onSuccess: () => {
+      // The occurrence is pending again: refresh the inbox plus everything
+      // under the history prefix (list, reconcile check, written blocks).
+      qc.invalidateQueries({ queryKey: qk.inbox });
+      qc.invalidateQueries({ queryKey: qk.history });
+    },
+    // Same as useReadd: a 409 means the ledger changed under us — refresh the
+    // check so the row's missing/present state catches up.
+    onError: () => qc.invalidateQueries({ queryKey: qk.historyCheck }),
+  });
+}
+
+export function useUnskip() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => api.unskip(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: qk.inbox });
+      qc.invalidateQueries({ queryKey: qk.history });
+    },
   });
 }
 

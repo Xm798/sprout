@@ -5,6 +5,7 @@ import pytest
 
 from app.config import AppConfig
 from app.writer import target_path, append_transaction, validate_target_file, ensure_included
+from app.writer import delete_block, read_block
 
 
 def _cfg(tmp_path, **kw):
@@ -170,3 +171,118 @@ def test_ensure_included_relpath_when_root_differs_from_main_dir(tmp_path):
     cfg = _cfg(tmp_path, ledger_main_file=str(main))
     ensure_included(cfg, tmp_path / "rent.bean")
     assert 'include "../rent.bean"' in main.read_text()
+
+
+# ── delete_block / read_block ──────────────────────────────────────────────────
+
+BLOCK = (
+    '2026-01-15 * "Spotify" "sub" #sprout\n'
+    '  sprout-id: "sch1-20260115"\n'
+    "  Expenses:Subscription  15.00 USD\n"
+    "  Assets:CreditCard\n"
+)
+OTHER = (
+    '2026-02-01 * "Other" "manual"\n'
+    "  Expenses:Subscription  1.00 USD\n"
+    "  Assets:CreditCard\n"
+)
+
+
+def _header_line(path: Path, needle: str) -> int:
+    for i, line in enumerate(path.read_text().splitlines(), 1):
+        if needle in line:
+            return i
+    raise AssertionError(f"{needle!r} not found in {path}")
+
+
+def test_delete_block_followed_by_entry(tmp_path):
+    p = tmp_path / "x.bean"
+    p.write_text(BLOCK + "\n" + OTHER)
+    removed = delete_block(p, _header_line(p, "Spotify"))
+    assert removed == BLOCK
+    assert p.read_text() == OTHER
+    assert not list(tmp_path.glob("*.tmp"))
+
+
+def test_delete_block_in_middle_collapses_to_one_blank(tmp_path):
+    p = tmp_path / "x.bean"
+    p.write_text(OTHER + "\n\n" + BLOCK + "\n\n\n" + OTHER)
+    delete_block(p, _header_line(p, "Spotify"))
+    assert p.read_text() == OTHER + "\n" + OTHER
+
+
+def test_delete_block_at_eof(tmp_path):
+    p = tmp_path / "x.bean"
+    p.write_text(OTHER + "\n" + BLOCK)
+    removed = delete_block(p, _header_line(p, "Spotify"))
+    assert removed == BLOCK
+    assert p.read_text() == OTHER
+
+
+def test_delete_block_with_trailing_blank_lines_at_eof(tmp_path):
+    p = tmp_path / "x.bean"
+    p.write_text(OTHER + "\n" + BLOCK + "\n\n")
+    delete_block(p, _header_line(p, "Spotify"))
+    assert p.read_text() == OTHER
+
+
+def test_delete_block_multi_leg_with_metadata_and_comments(tmp_path):
+    block = (
+        '2026-01-15 * "Multi" "legs"\n'
+        '  sprout-id: "m1"\n'
+        '  note: "extra metadata"\n'
+        "  Expenses:A  10.00 USD ; per-posting comment\n"
+        "  ; standalone comment inside the block\n"
+        "  Expenses:B  5.00 USD\n"
+        "  Assets:C\n"
+        "  ; trailing indented comment belongs to the block\n"
+    )
+    p = tmp_path / "x.bean"
+    p.write_text(block + "\n" + OTHER)
+    removed = delete_block(p, _header_line(p, "Multi"))
+    assert removed == block
+    assert p.read_text() == OTHER
+
+
+def test_delete_block_tab_indented_postings(tmp_path):
+    block = (
+        '2026-01-15 * "Tabs" "tabbed"\n'
+        '\tsprout-id: "t1"\n'
+        "\tExpenses:A\t10.00 USD\n"
+        "\tAssets:C\n"
+    )
+    p = tmp_path / "x.bean"
+    p.write_text(block + "\n" + OTHER)
+    removed = delete_block(p, _header_line(p, "Tabs"))
+    assert removed == block
+    assert p.read_text() == OTHER
+
+
+def test_delete_block_keeps_preceding_toplevel_comment(tmp_path):
+    p = tmp_path / "x.bean"
+    p.write_text(OTHER + "\n; a note about the block below\n" + BLOCK)
+    delete_block(p, _header_line(p, "Spotify"))
+    assert p.read_text() == OTHER + "\n; a note about the block below\n"
+
+
+def test_delete_block_only_transaction_leaves_empty_file(tmp_path):
+    p = tmp_path / "x.bean"
+    p.write_text(BLOCK)
+    assert delete_block(p, 1) == BLOCK
+    assert p.read_text() == ""
+
+
+def test_delete_block_lineno_out_of_range(tmp_path):
+    p = tmp_path / "x.bean"
+    p.write_text(BLOCK)
+    with pytest.raises(ValueError):
+        delete_block(p, 99)
+    assert p.read_text() == BLOCK
+
+
+def test_read_block_returns_block_without_deleting(tmp_path):
+    p = tmp_path / "x.bean"
+    p.write_text(OTHER + "\n" + BLOCK + "\n" + OTHER)
+    before = p.read_bytes()
+    assert read_block(p, _header_line(p, "Spotify")) == BLOCK
+    assert p.read_bytes() == before
