@@ -10,6 +10,11 @@ export const resources = {
   "zh-CN": { translation: zhCN },
 } as const;
 
+// Browsers report zh, zh-TW, zh-Hans-CN, …; we ship one Chinese locale.
+export function normalizeDetectedLanguage(lng: string) {
+  return lng.toLowerCase().startsWith("zh") ? "zh-CN" : lng;
+}
+
 i18n
   .use(LanguageDetector)
   .use(initReactI18next)
@@ -21,9 +26,7 @@ i18n
       order: ["localStorage", "navigator"],
       caches: ["localStorage"],
       lookupLocalStorage: "sprout-lang",
-      // Browsers report zh, zh-TW, zh-Hans-CN, …; we ship one Chinese locale.
-      convertDetectedLanguage: (lng: string) =>
-        lng.toLowerCase().startsWith("zh") ? "zh-CN" : lng,
+      convertDetectedLanguage: normalizeDetectedLanguage,
     },
     interpolation: { escapeValue: false }, // React already escapes
   });

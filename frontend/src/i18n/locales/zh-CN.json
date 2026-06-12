@@ -87,7 +87,7 @@
   },
   "schedules": {
     "title": "周期计划",
-    "subtitle": "为收件箱供稿的周期付款。",
+    "subtitle": "到期后会进入收件箱的周期付款。",
     "newSchedule": "新建计划",
     "dialogDescription": "定义一笔周期付款，到期后会出现在收件箱中。",
     "sheetDescription": "定义一笔周期付款。",
