@@ -11,7 +11,14 @@ import {
   useCurrencies,
   useUpdateSchedule,
 } from "@/api/hooks";
-import type { IntervalUnit, Posting, Schedule, ScheduleCreate } from "@/api/types";
+import type {
+  Cost,
+  IntervalUnit,
+  Posting,
+  Price,
+  Schedule,
+  ScheduleCreate,
+} from "@/api/types";
 import { Button } from "@/components/ui/button";
 import { Combobox } from "@/components/ui/combobox";
 import { DatePicker } from "@/components/ui/date-picker";
@@ -28,11 +35,15 @@ import { errorMessage } from "@/lib/utils";
 
 // Editing shape: amounts/currencies stay plain strings while typing; an empty
 // amount marks an auto-balance leg and is serialized to null on submit.
+// cost/price have no form UI but must round-trip untouched when editing a
+// schedule that carries them (e.g. created via the API).
 interface DraftPosting {
   id: string;
   account: string;
   amount: string;
   currency: string;
+  cost?: Cost | null;
+  price?: Price | null;
 }
 
 type Draft = Omit<ScheduleCreate, "postings" | "target_file"> & {
@@ -80,6 +91,8 @@ function scheduleToDraft(s: Schedule): Draft {
       account: p.account,
       amount: p.amount ?? "",
       currency: p.currency ?? "",
+      cost: p.cost ?? null,
+      price: p.price ?? null,
     })),
   };
 }
@@ -88,9 +101,18 @@ function toPayload(draft: Draft): ScheduleCreate {
   const postings: Posting[] = draft.postings.map((p) => {
     const amount = p.amount.trim();
     const account = p.account.trim();
+    // Blanking the amount turns the leg into an auto-balance leg, which
+    // cannot carry cost/price; otherwise annotations pass through untouched.
     return amount === ""
       ? { id: p.id, account, amount: null, currency: null }
-      : { id: p.id, account, amount, currency: p.currency };
+      : {
+          id: p.id,
+          account,
+          amount,
+          currency: p.currency,
+          cost: p.cost ?? null,
+          price: p.price ?? null,
+        };
   });
   return { ...draft, target_file: draft.target_file.trim() || null, postings };
 }

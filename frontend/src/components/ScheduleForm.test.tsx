@@ -57,6 +57,8 @@ test("submits a new schedule with an amount leg and an auto-balance leg", async 
       account: "Expenses:Subscription",
       amount: "15.00",
       currency: "USD",
+      cost: null,
+      price: null,
     },
     {
       id: expect.any(String),
@@ -182,4 +184,25 @@ test("edit mode prefills fields and PUTs with preserved posting ids", async () =
   // Stored posting ids must survive the round-trip so the backend keeps
   // per-leg overrides on untouched legs.
   expect(body.postings.map((p: Posting) => p.id)).toEqual(["main", "bal"]);
+});
+
+test("edit mode round-trips cost/price annotations the form can't edit", async () => {
+  const user = userEvent.setup();
+  const cost = { amount: "1.10", currency: "USD", total: false };
+  const price = { amount: "7.50", currency: "USD", total: true };
+  const withAnnotations: Schedule = {
+    ...existing,
+    postings: [
+      { ...existing.postings[0], cost, price },
+      existing.postings[1],
+    ],
+  };
+  renderWithProviders(<ScheduleForm schedule={withAnnotations} />);
+
+  await user.click(screen.getByRole("button", { name: /save changes/i }));
+
+  await waitFor(() => expect(api.updateSchedule).toHaveBeenCalledTimes(1));
+  const [, body] = (api.updateSchedule as ReturnType<typeof vi.fn>).mock.calls[0];
+  expect(body.postings[0].cost).toEqual(cost);
+  expect(body.postings[0].price).toEqual(price);
 });
