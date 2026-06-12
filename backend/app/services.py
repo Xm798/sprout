@@ -26,8 +26,13 @@ from app.writer import (
 logger = logging.getLogger(__name__)
 
 
+def _materialization_horizon(config: AppConfig, today: datetime.date) -> datetime.date:
+    """How far ahead occurrences exist; materialization and pruning must agree."""
+    return today + datetime.timedelta(days=config.lookahead_days)
+
+
 def materialize_occurrences(session: Session, config: AppConfig, today: datetime.date) -> int:
-    horizon = today + datetime.timedelta(days=config.lookahead_days)
+    horizon = _materialization_horizon(config, today)
     created = 0
     schedules = session.exec(select(Schedule).where(Schedule.status == "active")).all()
     for sch in schedules:
@@ -390,7 +395,10 @@ def unskip_occurrence(session: Session, occurrence_id: int) -> Occurrence:
     return occ
 
 
-def update_schedule(session: Session, schedule_id: int, payload: ScheduleCreate) -> Schedule:
+def update_schedule(
+    session: Session, config: AppConfig, schedule_id: int,
+    payload: ScheduleCreate, today: datetime.date,
+) -> Schedule:
     sch = session.get(Schedule, schedule_id)
     if sch is None:
         raise LookupError(f"schedule {schedule_id} not found")
@@ -403,12 +411,24 @@ def update_schedule(session: Session, schedule_id: int, payload: ScheduleCreate)
     sch.postings = dump_postings(payload.postings)
     sch.updated_at = datetime.datetime.now()
 
-    pendings = session.exec(
+    # Dates the edited rule still produces within the materialization horizon.
+    horizon = _materialization_horizon(config, today)
+    valid_dates = set(compute_due_dates(
+        payload.anchor_date, payload.interval_unit, payload.interval_count,
+        horizon, payload.end_date, payload.max_count,
+    ))
+
+    unconfirmed = session.exec(
         select(Occurrence).where(
             Occurrence.schedule_id == schedule_id, Occurrence.status != "confirmed"
         )
     ).all()
-    for occ in pendings:
+    for occ in unconfirmed:
+        # A pending the new rule no longer produces is stale — drop it.
+        # Skipped rows are explicit user decisions and stay, like confirmed ones.
+        if occ.status == "pending" and occ.due_date not in valid_dates:
+            session.delete(occ)
+            continue
         if not occ.override_amounts:
             continue
         kept = {

@@ -1,6 +1,9 @@
+import datetime
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, select
 
+from app.config import AppConfig
 from app.db import get_session, get_config
 from app.models import Schedule, ScheduleBase, ScheduleCreate, ScheduleRead
 from app.postings import parse_postings, validate_postings, headline, dump_postings
@@ -21,19 +24,19 @@ def _read(sch: Schedule) -> ScheduleRead:
     )
 
 
-def _validate_or_422(payload: ScheduleCreate, session: Session) -> None:
+def _validate_or_422(payload: ScheduleCreate, config: AppConfig) -> None:
     errors = validate_postings(payload.postings)
     if errors:
         raise HTTPException(422, "; ".join(errors))
     try:
-        payload.target_file = validate_target_file(get_config(session), payload.target_file)
+        payload.target_file = validate_target_file(config, payload.target_file)
     except ValueError as exc:
         raise HTTPException(422, str(exc))
 
 
 @router.post("", response_model=ScheduleRead)
 def create(payload: ScheduleCreate, session: Session = Depends(get_session)) -> ScheduleRead:
-    _validate_or_422(payload, session)
+    _validate_or_422(payload, get_config(session))
     sch = Schedule(**payload.model_dump(exclude={"postings"}), postings=dump_postings(payload.postings))
     session.add(sch)
     session.commit()
@@ -56,9 +59,12 @@ def get_one(schedule_id: int, session: Session = Depends(get_session)) -> Schedu
 
 @router.put("/{schedule_id}", response_model=ScheduleRead)
 def update(schedule_id: int, payload: ScheduleCreate, session: Session = Depends(get_session)) -> ScheduleRead:
-    _validate_or_422(payload, session)
+    config = get_config(session)
+    _validate_or_422(payload, config)
     try:
-        sch = services.update_schedule(session, schedule_id, payload)
+        sch = services.update_schedule(
+            session, config, schedule_id, payload, datetime.date.today()
+        )
     except LookupError as exc:
         raise HTTPException(404, str(exc))
     return _read(sch)

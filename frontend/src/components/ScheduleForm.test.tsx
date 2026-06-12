@@ -2,8 +2,9 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, test, vi } from "vitest";
 import { ScheduleForm } from "./ScheduleForm";
-import { renderWithProviders } from "../test/utils";
+import { makeSchedule, renderWithProviders } from "../test/utils";
 import { api } from "../api/client";
+import type { Posting, Schedule } from "../api/types";
 
 vi.mock("../api/client", () => ({
   api: {
@@ -13,6 +14,7 @@ vi.mock("../api/client", () => ({
     // ScheduleForm only reads default_currency off the config.
     getConfig: vi.fn().mockResolvedValue({ id: 1, default_currency: "USD" }),
     createSchedule: vi.fn().mockResolvedValue({ id: 1 }),
+    updateSchedule: vi.fn().mockResolvedValue({ id: 7 }),
   },
 }));
 
@@ -55,6 +57,8 @@ test("submits a new schedule with an amount leg and an auto-balance leg", async 
       account: "Expenses:Subscription",
       amount: "15.00",
       currency: "USD",
+      cost: null,
+      price: null,
     },
     {
       id: expect.any(String),
@@ -135,4 +139,50 @@ test("adds and removes posting rows down to a floor of two", async () => {
 
   await user.click(screen.getByLabelText(/remove posting 3/i));
   expect(screen.queryByLabelText(/account 3/i)).not.toBeInTheDocument();
+});
+
+const existing = makeSchedule();
+
+test("edit mode prefills fields and PUTs with preserved posting ids", async () => {
+  const user = userEvent.setup();
+  renderWithProviders(<ScheduleForm schedule={existing} />);
+
+  const name = screen.getByLabelText(/^name$/i);
+  expect(name).toHaveValue("Spotify");
+  expect(screen.getByLabelText(/amount 1/i)).toHaveValue("15.00");
+  expect(screen.getByLabelText(/account 2/i)).toHaveValue("Assets:CreditCard");
+
+  await user.clear(name);
+  await user.type(name, "Spotify Family");
+  await user.click(screen.getByRole("button", { name: /save changes/i }));
+
+  await waitFor(() => expect(api.updateSchedule).toHaveBeenCalledTimes(1));
+  expect(api.createSchedule).not.toHaveBeenCalled();
+  const [id, body] = (api.updateSchedule as ReturnType<typeof vi.fn>).mock.calls[0];
+  expect(id).toBe(7);
+  expect(body.name).toBe("Spotify Family");
+  // Stored posting ids must survive the round-trip so the backend keeps
+  // per-leg overrides on untouched legs.
+  expect(body.postings.map((p: Posting) => p.id)).toEqual(["main", "bal"]);
+});
+
+test("edit mode round-trips cost/price annotations the form can't edit", async () => {
+  const user = userEvent.setup();
+  const cost = { amount: "1.10", currency: "USD", total: false };
+  const price = { amount: "7.50", currency: "USD", total: true };
+  const withAnnotations: Schedule = {
+    ...existing,
+    postings: [
+      { ...existing.postings[0], cost, price },
+      existing.postings[1],
+    ],
+  };
+  renderWithProviders(<ScheduleForm schedule={withAnnotations} />);
+
+  await user.click(screen.getByRole("button", { name: /save changes/i }));
+
+  await waitFor(() => expect(api.updateSchedule).toHaveBeenCalledTimes(1));
+  const [, body] = (api.updateSchedule as ReturnType<typeof vi.fn>).mock.calls[0];
+  expect(body.postings[0].cost).toEqual(cost);
+  expect(body.postings[0].price).toEqual(price);
 });
