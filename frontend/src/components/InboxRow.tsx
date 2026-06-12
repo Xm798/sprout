@@ -1,28 +1,19 @@
 import { useState } from "react";
-import { ArrowRight, Check, ChevronDown, SkipForward } from "lucide-react";
+import { Check, ChevronDown, SkipForward } from "lucide-react";
 import { toast } from "sonner";
 
 import { useConfirm, usePreview, useSkip } from "@/api/hooks";
-import {
-  balanceLeg,
-  effectiveHeadlineAmount,
-  headlineLeg,
-} from "@/api/postings";
+import { analyzeFlow, headlineLeg } from "@/api/postings";
 import type { ConfirmBody, Occurrence, Schedule } from "@/api/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { DatePicker } from "@/components/ui/date-picker";
+import { FlowAccounts } from "@/components/FlowAccounts";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
-import { cn, errorMessage, formatAmount, formatDate } from "@/lib/utils";
-
-function leaf(account?: string) {
-  if (!account) return "—";
-  const parts = account.split(":");
-  return parts[parts.length - 1] || account;
-}
+import { cn, errorMessage, formatAmount, formatDate, leafAccount } from "@/lib/utils";
 
 export function InboxRow({
   occurrence,
@@ -40,11 +31,18 @@ export function InboxRow({
   const skip = useSkip();
 
   const name = schedule?.name ?? `Schedule ${occurrence.schedule_id}`;
-  // Headline = first amount-bearing leg; edits in this row tune that leg.
+  // Headline = net flow of the auto-balance leg; edits in this row still tune
+  // the first amount-bearing leg.
+  const flow = analyzeFlow(schedule?.postings, occurrence.override_amounts);
   const amountLeg = headlineLeg(schedule?.postings);
-  const blankLeg = balanceLeg(schedule?.postings);
   const headlineId = amountLeg?.id;
-  const baseAmount = effectiveHeadlineAmount(occurrence, schedule) ?? "";
+  const baseAmount = flow.amount ?? schedule?.headline_amount ?? "";
+  const baseCurrency = flow.currency ?? schedule?.headline_currency ?? undefined;
+  // The editable leg's own effective amount — distinct from the net headline.
+  const legAmount =
+    (headlineId != null ? occurrence.override_amounts[headlineId] : undefined) ??
+    amountLeg?.amount ??
+    "";
   const effectiveDate = occurrence.override_date ?? occurrence.due_date;
   const fieldId = `occ-${occurrence.id}`;
 
@@ -93,10 +91,8 @@ export function InboxRow({
               {occurrence.status}
             </Badge>
           </div>
-          <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
-            <span>{leaf(amountLeg?.account)}</span>
-            <ArrowRight className="h-3.5 w-3.5 shrink-0 opacity-70" />
-            <span>{leaf(blankLeg?.account)}</span>
+          <div className="flex min-w-0 items-center gap-1.5 text-sm text-muted-foreground">
+            <FlowAccounts flow={flow} />
           </div>
           <p className="text-xs text-muted-foreground">
             Due {formatDate(effectiveDate)}
@@ -105,7 +101,7 @@ export function InboxRow({
 
         <div className="text-right">
           <div className="font-mono text-lg font-semibold tabular-nums">
-            {formatAmount(baseAmount, schedule?.headline_currency ?? undefined)}
+            {formatAmount(baseAmount, baseCurrency)}
           </div>
         </div>
       </div>
@@ -154,13 +150,13 @@ export function InboxRow({
           <div className="grid gap-3 sm:grid-cols-3">
             <div className="space-y-1.5">
               <Label htmlFor={`${fieldId}-amount`}>
-                Amount{amountLeg ? ` · ${leaf(amountLeg.account)}` : ""}
+                Amount{amountLeg ? ` · ${leafAccount(amountLeg.account)}` : ""}
               </Label>
               <Input
                 id={`${fieldId}-amount`}
                 inputMode="decimal"
                 disabled={headlineId == null}
-                placeholder={String(baseAmount)}
+                placeholder={String(legAmount)}
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
               />
