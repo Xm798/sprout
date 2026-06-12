@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { FileWarning, Pencil, RotateCcw, Undo2 } from "lucide-react";
+import { Trans, useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 
@@ -58,6 +59,7 @@ function EditInInboxDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
+  const { t } = useTranslation();
   const written = useWritten(occurrence.id, open);
   const unconfirm = useUnconfirm();
   const qc = useQueryClient();
@@ -78,12 +80,12 @@ function EditInInboxDialog({
     unconfirm.mutate(occurrence.id, {
       onSuccess: () => {
         onOpenChange(false);
-        toast.success(`${name} moved back to the inbox`, {
-          action: { label: "Go to inbox", onClick: () => navigate("/") },
+        toast.success(t("history.movedBackToast", { name }), {
+          action: { label: t("history.goToInbox"), onClick: () => navigate("/") },
         });
       },
       onError: (e) =>
-        toast.error(`Couldn't move ${name} back to the inbox`, {
+        toast.error(t("history.moveBackFailedToast", { name }), {
           description: errorMessage(e),
         }),
     });
@@ -94,40 +96,39 @@ function EditInInboxDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Edit in inbox</DialogTitle>
+          <DialogTitle>{t("history.dialogTitle")}</DialogTitle>
           <DialogDescription>
-            This deletes the transaction below
             {file ? (
-              <>
-                {" "}
-                from <span className="font-mono">{file}</span>
-              </>
-            ) : null}{" "}
-            and returns the occurrence to the inbox.
+              <Trans
+                i18nKey="history.dialogBodyWithFile"
+                values={{ file }}
+                components={{ mono: <span className="font-mono" /> }}
+              />
+            ) : (
+              t("history.dialogBody")
+            )}
           </DialogDescription>
         </DialogHeader>
         <pre className="max-h-56 overflow-auto rounded-lg border border-border/60 bg-background/80 p-3 font-mono text-xs leading-relaxed text-foreground/90">
           {written.isLoading
-            ? "Loading transaction…"
+            ? t("history.loadingTransaction")
             : written.isError
-              ? `Failed to load the transaction: ${errorMessage(written.error)}`
+              ? t("history.loadTransactionFailed", { error: errorMessage(written.error) })
               : (written.data?.text ?? "")}
         </pre>
         <p className="text-sm text-warning">
-          Any manual edits in this text are deleted with it. The inbox rebuilds
-          the transaction from Sprout's stored schedule and overrides, which
-          may differ from what is shown here.
+          {t("history.manualEditsWarning")}
         </p>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button
             variant="destructive"
             onClick={onConfirm}
             disabled={!written.isSuccess || unconfirm.isPending}
           >
-            Delete &amp; move to inbox
+            {t("history.deleteAndMove")}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -146,11 +147,12 @@ function HistoryRow({
   ledgerRoot?: string;
   missing: boolean;
 }) {
+  const { t } = useTranslation();
   const readd = useReadd();
   const unconfirm = useUnconfirm();
   const unskip = useUnskip();
   const [editOpen, setEditOpen] = useState(false);
-  const name = schedule?.name ?? `Schedule ${occurrence.schedule_id}`;
+  const name = schedule?.name ?? t("common.scheduleFallback", { id: occurrence.schedule_id });
   const amount = effectiveHeadlineAmount(occurrence, schedule) ?? "";
   const effectiveDate = occurrence.override_date ?? occurrence.due_date;
   const file = writtenFile(occurrence.written_path, ledgerRoot);
@@ -159,9 +161,9 @@ function HistoryRow({
 
   function onReadd() {
     readd.mutate(occurrence.id, {
-      onSuccess: () => toast.success(`Re-added ${name} to the ledger`),
+      onSuccess: () => toast.success(t("history.readdedToast", { name })),
       onError: (e) =>
-        toast.error(`Couldn't re-add ${name}`, {
+        toast.error(t("history.readdFailedToast", { name }), {
           description: errorMessage(e),
         }),
     });
@@ -170,9 +172,9 @@ function HistoryRow({
   // The missing variant of unconfirm: nothing is deleted, so no dialog.
   function onMoveBack() {
     unconfirm.mutate(occurrence.id, {
-      onSuccess: () => toast.success(`${name} moved back to the inbox`),
+      onSuccess: () => toast.success(t("history.movedBackToast", { name })),
       onError: (e) =>
-        toast.error(`Couldn't move ${name} back to the inbox`, {
+        toast.error(t("history.moveBackFailedToast", { name }), {
           description: errorMessage(e),
         }),
     });
@@ -180,9 +182,9 @@ function HistoryRow({
 
   function onUnskip() {
     unskip.mutate(occurrence.id, {
-      onSuccess: () => toast.success(`${name} is back in the inbox`),
+      onSuccess: () => toast.success(t("history.unskippedToast", { name })),
       onError: (e) =>
-        toast.error(`Couldn't unskip ${name}`, {
+        toast.error(t("history.unskipFailedToast", { name }), {
           description: errorMessage(e),
         }),
     });
@@ -196,16 +198,13 @@ function HistoryRow({
             <h3 className="truncate font-display text-base font-semibold">
               {name}
             </h3>
-            <Badge
-              variant={confirmed ? "success" : "secondary"}
-              className="capitalize"
-            >
-              {occurrence.status}
+            <Badge variant={confirmed ? "success" : "secondary"}>
+              {t(`common.status.${occurrence.status}`)}
             </Badge>
             {missing && (
               <Badge variant="destructive">
                 <FileWarning className="h-3 w-3" />
-                Missing from ledger
+                {t("history.missingFromLedger")}
               </Badge>
             )}
           </div>
@@ -222,14 +221,14 @@ function HistoryRow({
           {confirmed && !missing && (
             <Button size="sm" variant="outline" onClick={() => setEditOpen(true)}>
               <Pencil className="h-4 w-4" />
-              Edit in inbox
+              {t("history.editInInbox")}
             </Button>
           )}
           {confirmed && missing && (
             <>
               <Button size="sm" onClick={onReadd} disabled={readd.isPending}>
                 <RotateCcw className="h-4 w-4" />
-                Re-add
+                {t("history.readd")}
               </Button>
               <Button
                 size="sm"
@@ -238,7 +237,7 @@ function HistoryRow({
                 disabled={unconfirm.isPending}
               >
                 <Undo2 className="h-4 w-4" />
-                Move back to inbox
+                {t("history.moveBackToInbox")}
               </Button>
             </>
           )}
@@ -250,7 +249,7 @@ function HistoryRow({
               disabled={unskip.isPending}
             >
               <Undo2 className="h-4 w-4" />
-              Unskip
+              {t("history.unskip")}
             </Button>
           )}
         </div>
@@ -269,6 +268,7 @@ function HistoryRow({
 }
 
 export function HistoryPage() {
+  const { t } = useTranslation();
   const history = useHistory();
   const schedules = useSchedules();
   const config = useConfig();
@@ -282,16 +282,16 @@ export function HistoryPage() {
     <div className="mx-auto max-w-2xl space-y-6">
       <header className="space-y-1">
         <h1 className="font-display text-3xl font-semibold tracking-tight">
-          History
+          {t("history.title")}
         </h1>
         <p className="text-sm text-muted-foreground">
           {missing.size > 0
-            ? `${missing.size} written transaction(s) missing from the ledger.`
-            : "Confirmed and skipped occurrences, checked against your ledger."}
+            ? t("history.missingCount", { count: missing.size })
+            : t("history.subtitle")}
         </p>
         {check.isError && (
           <p className="text-sm text-warning">
-            Ledger check failed: {errorMessage(check.error)}
+            {t("history.checkFailed", { error: errorMessage(check.error) })}
           </p>
         )}
       </header>
@@ -305,15 +305,15 @@ export function HistoryPage() {
       ) : history.isError ? (
         <Card>
           <CardContent className="p-6 text-center text-sm text-destructive">
-            Failed to load history. Check that the API is reachable.
+            {t("history.loadFailed")}
           </CardContent>
         </Card>
       ) : items.length === 0 ? (
         <Card className="border-dashed bg-card/50">
           <CardContent className="px-6 py-14 text-center">
-            <p className="font-display text-lg font-semibold">No history yet</p>
+            <p className="font-display text-lg font-semibold">{t("history.emptyTitle")}</p>
             <p className="mt-1 text-sm text-muted-foreground">
-              Occurrences you confirm or skip in the inbox will show up here.
+              {t("history.emptyBody")}
             </p>
           </CardContent>
         </Card>

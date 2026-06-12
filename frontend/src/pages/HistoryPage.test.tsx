@@ -100,8 +100,8 @@ test("renders confirmed and skipped rows with status badges", async () => {
   mockAll();
   renderWithProviders(<HistoryPage />);
 
-  expect(await screen.findByText("confirmed")).toBeInTheDocument();
-  expect(screen.getByText("skipped")).toBeInTheDocument();
+  expect(await screen.findByText("Confirmed")).toBeInTheDocument();
+  expect(screen.getByText("Skipped")).toBeInTheDocument();
   expect(screen.getAllByText("Rent")).toHaveLength(2);
   // Written file shown relative to the ledger root.
   expect(screen.getByText(/sprout\.bean/)).toBeInTheDocument();
@@ -157,7 +157,7 @@ test("closes the edit dialog and refreshes the check on a 409", async () => {
   );
   const user = userEvent.setup();
   renderWithProviders(<HistoryPage />);
-  expect(await screen.findByText("confirmed")).toBeInTheDocument();
+  expect(await screen.findByText("Confirmed")).toBeInTheDocument();
   expect(api.checkHistory).toHaveBeenCalledTimes(1);
 
   await user.click(screen.getByRole("button", { name: /edit in inbox/i }));
@@ -201,7 +201,7 @@ test("shows the check error without hiding history", async () => {
   );
   renderWithProviders(<HistoryPage />);
 
-  expect(await screen.findByText("confirmed")).toBeInTheDocument();
+  expect(await screen.findByText("Confirmed")).toBeInTheDocument();
   expect(
     await screen.findByText(/ledger check failed/i)
   ).toBeInTheDocument();
