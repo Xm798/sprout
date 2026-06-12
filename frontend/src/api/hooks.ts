@@ -124,6 +124,9 @@ export function useUnconfirm() {
       qc.invalidateQueries({ queryKey: qk.inbox });
       qc.invalidateQueries({ queryKey: qk.history });
     },
+    // Same as useReadd: a 409 means the ledger changed under us — refresh the
+    // check so the row's missing/present state catches up.
+    onError: () => qc.invalidateQueries({ queryKey: qk.historyCheck }),
   });
 }
 
