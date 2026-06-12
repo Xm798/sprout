@@ -1,5 +1,6 @@
 import { CheckCheck } from "lucide-react";
 import { toast } from "sonner";
+import { useTranslation } from "react-i18next";
 
 import { useConfirm, useInbox, useSchedules } from "@/api/hooks";
 import { effectiveHeadlineAmount } from "@/api/postings";
@@ -11,6 +12,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { formatAmount } from "@/lib/utils";
 
 export function InboxPage() {
+  const { t } = useTranslation();
   const inbox = useInbox();
   const schedules = useSchedules();
   const confirm = useConfirm();
@@ -33,7 +35,7 @@ export function InboxPage() {
 
   function confirmAll() {
     items.forEach((o) => confirm.mutate({ id: o.id, body: {} }));
-    toast.success(`Confirming ${items.length} occurrence(s)`);
+    toast.success(t("inbox.confirmingCount", { count: items.length }));
   }
 
   return (
@@ -41,12 +43,12 @@ export function InboxPage() {
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div className="space-y-1">
           <h1 className="font-display text-3xl font-semibold tracking-tight">
-            Inbox
+            {t("inbox.title")}
           </h1>
           <p className="text-sm text-muted-foreground">
             {items.length > 0
-              ? `${items.length} due${totalLabel ? ` · ${totalLabel}` : ""}`
-              : "Review and confirm what's due."}
+              ? `${t("inbox.dueCount", { count: items.length })}${totalLabel ? ` · ${totalLabel}` : ""}`
+              : t("inbox.subtitle")}
           </p>
         </div>
         {items.length > 0 && (
@@ -56,7 +58,7 @@ export function InboxPage() {
             disabled={confirm.isPending}
           >
             <CheckCheck className="h-4 w-4" />
-            Confirm all
+            {t("inbox.confirmAll")}
           </Button>
         )}
       </header>
@@ -70,7 +72,7 @@ export function InboxPage() {
       ) : inbox.isError ? (
         <Card>
           <CardContent className="p-6 text-center text-sm text-destructive">
-            Failed to load inbox. Check that the API is reachable.
+            {t("inbox.loadFailed")}
           </CardContent>
         </Card>
       ) : items.length === 0 ? (
@@ -81,11 +83,10 @@ export function InboxPage() {
             </span>
             <div className="space-y-1">
               <p className="font-display text-lg font-semibold">
-                You're all caught up
+                {t("inbox.emptyTitle")}
               </p>
               <p className="text-sm text-muted-foreground">
-                Nothing is due right now. New occurrences appear here as they
-                come around.
+                {t("inbox.emptyBody")}
               </p>
             </div>
           </CardContent>
