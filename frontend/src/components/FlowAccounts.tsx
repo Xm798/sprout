@@ -1,4 +1,5 @@
 import { ArrowRight } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 import type { FlowLeg, PostingFlow } from "@/api/postings";
 import { useMediaQuery } from "@/hooks/use-media-query";
@@ -13,6 +14,7 @@ function Side({
   cap: number;
   leafNames: boolean;
 }) {
+  const { t } = useTranslation();
   const shown = legs.slice(0, cap);
   const hidden = legs.slice(cap);
   const label = (account: string) => (leafNames ? leafAccount(account) : account);
@@ -29,7 +31,7 @@ function Side({
         <span
           className="shrink-0 rounded-full bg-muted px-1.5 py-px text-[10px] font-medium text-muted-foreground"
           title={hiddenNames}
-          aria-label={`+${hidden.length} more: ${hiddenNames}`}
+          aria-label={t("flowAccounts.moreCount", { count: hidden.length, names: hiddenNames })}
         >
           +{hidden.length}
         </span>

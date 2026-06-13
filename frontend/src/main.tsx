@@ -7,6 +7,7 @@ import { ThemeProvider } from "next-themes";
 import App from "./App";
 import { Toaster } from "@/components/ui/sonner";
 import "./index.css";
+import "./i18n";
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 30_000 } },

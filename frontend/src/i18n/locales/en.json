@@ -1,0 +1,178 @@
+{
+  "nav": {
+    "inbox": "Inbox",
+    "history": "History",
+    "schedules": "Schedules",
+    "settings": "Settings"
+  },
+  "langToggle": {
+    "label": "Switch language"
+  },
+  "modeToggle": {
+    "label": "Toggle theme",
+    "light": "Light",
+    "dark": "Dark",
+    "system": "System"
+  },
+  "datePicker": {
+    "pickDate": "Pick a date",
+    "today": "Today",
+    "clear": "Clear"
+  },
+  "flowAccounts": {
+    "moreCount": "+{{count}} more: {{names}}"
+  },
+  "common": {
+    "loading": "Loading…",
+    "saving": "Saving…",
+    "cancel": "Cancel",
+    "scheduleFallback": "Schedule {{id}}",
+    "status": {
+      "pending": "Pending",
+      "confirmed": "Confirmed",
+      "skipped": "Skipped"
+    }
+  },
+  "inbox": {
+    "title": "Inbox",
+    "subtitle": "Review and confirm what's due.",
+    "dueCount": "{{count}} due",
+    "confirmAll": "Confirm all",
+    "confirmingCount_one": "Confirming {{count}} occurrence",
+    "confirmingCount_other": "Confirming {{count}} occurrences",
+    "loadFailed": "Failed to load inbox. Check that the API is reachable.",
+    "emptyTitle": "You're all caught up",
+    "emptyBody": "Nothing is due right now. New occurrences appear here as they come around."
+  },
+  "inboxRow": {
+    "due": "Due {{date}}",
+    "confirm": "Confirm",
+    "skip": "Skip",
+    "preview": "Preview",
+    "hide": "Hide",
+    "confirmedToast": "Confirmed {{name}}",
+    "confirmFailedToast": "Couldn't confirm {{name}}",
+    "skippedToast": "Skipped {{name}}",
+    "amount": "Amount",
+    "date": "Date",
+    "narration": "Narration",
+    "overrideDate": "Override date",
+    "overrideNarration": "Override narration",
+    "beancountPreview": "Beancount preview",
+    "previewFailed": "Failed to render preview."
+  },
+  "history": {
+    "title": "History",
+    "subtitle": "Confirmed and skipped occurrences, checked against your ledger.",
+    "missingCount_one": "{{count}} written transaction missing from the ledger.",
+    "missingCount_other": "{{count}} written transactions missing from the ledger.",
+    "checkFailed": "Ledger check failed: {{error}}",
+    "loadFailed": "Failed to load history. Check that the API is reachable.",
+    "emptyTitle": "No history yet",
+    "emptyBody": "Occurrences you confirm or skip in the inbox will show up here.",
+    "missingFromLedger": "Missing from ledger",
+    "editInInbox": "Edit in inbox",
+    "readd": "Re-add",
+    "moveBackToInbox": "Move back to inbox",
+    "unskip": "Unskip",
+    "movedBackToast": "{{name}} moved back to the inbox",
+    "moveBackFailedToast": "Couldn't move {{name}} back to the inbox",
+    "goToInbox": "Go to inbox",
+    "readdedToast": "Re-added {{name}} to the ledger",
+    "readdFailedToast": "Couldn't re-add {{name}}",
+    "unskippedToast": "{{name}} is back in the inbox",
+    "unskipFailedToast": "Couldn't unskip {{name}}",
+    "dialogBody": "This deletes the transaction below and returns the occurrence to the inbox.",
+    "dialogBodyWithFile": "This deletes the transaction below from <mono>{{file}}</mono> and returns the occurrence to the inbox.",
+    "loadingTransaction": "Loading transaction…",
+    "loadTransactionFailed": "Failed to load the transaction: {{error}}",
+    "manualEditsWarning": "Any manual edits in this text are deleted with it. The inbox rebuilds the transaction from Sprout's stored schedule and overrides, which may differ from what is shown here.",
+    "deleteAndMove": "Delete & move to inbox"
+  },
+  "schedules": {
+    "title": "Schedules",
+    "subtitle": "Recurring payments that feed your inbox.",
+    "newSchedule": "New schedule",
+    "dialogDescription": "Define a recurring payment. It'll surface in your inbox when due.",
+    "sheetDescription": "Define a recurring payment.",
+    "emptyTitle": "No schedules yet",
+    "emptyBody": "Create your first recurring payment to get started.",
+    "deletedToast": "Deleted {{name}}",
+    "deleteAria": "Delete {{name}}",
+    "editSchedule": "Edit schedule",
+    "editAria": "Edit {{name}}",
+    "editDescription": "Changes apply to upcoming occurrences; confirmed history stays put.",
+    "everyOne": {
+      "day": "Every day",
+      "week": "Every week",
+      "month": "Every month",
+      "quarter": "Every quarter",
+      "year": "Every year"
+    },
+    "everyMany": {
+      "day": "Every {{count}} days",
+      "week": "Every {{count}} weeks",
+      "month": "Every {{count}} months",
+      "quarter": "Every {{count}} quarters",
+      "year": "Every {{count}} years"
+    }
+  },
+  "scheduleForm": {
+    "name": "Name",
+    "namePlaceholder": "e.g. Netflix",
+    "postings": "Postings",
+    "addPosting": "Add posting",
+    "postingN": "Posting {{n}}",
+    "autoBalanceLeg": "auto-balance leg",
+    "removePostingN": "Remove posting {{n}}",
+    "accountN": "Account {{n}}",
+    "accountPlaceholder": "Expenses:Subscriptions",
+    "amountN": "Amount {{n}}",
+    "amountPlaceholder": "Amount (blank = auto-balance)",
+    "currencyN": "Currency {{n}}",
+    "narration": "Narration",
+    "narrationPlaceholder": "Optional memo",
+    "repeatsEvery": "Repeats every",
+    "repeatCount": "Repeat count",
+    "repeatInterval": "Repeat interval",
+    "unit": {
+      "day": "Day",
+      "week": "Week",
+      "month": "Month",
+      "quarter": "Quarter",
+      "year": "Year"
+    },
+    "startingFrom": "Starting from",
+    "targetFile": "Target file",
+    "targetFilePlaceholder": "Default (global write mode)",
+    "newFileHint": "New file — it will be created and included in the main ledger automatically.",
+    "createFailedToast": "Couldn't create schedule",
+    "create": "Create schedule",
+    "saveChanges": "Save changes",
+    "updateFailedToast": "Couldn't update schedule"
+  },
+  "settings": {
+    "title": "Settings",
+    "subtitle": "Where and how Sprout writes Beancount transactions.",
+    "ledger": "Ledger",
+    "ledgerDescription": "Paths Sprout reads from and writes into.",
+    "ledgerMainFile": "Ledger main file",
+    "ledgerRoot": "Ledger root",
+    "writeMode": "Write mode",
+    "writeModeDescription": "How confirmed transactions are organized on disk.",
+    "mode": "Mode",
+    "writeModeAria": "write mode",
+    "singleFile": "Single file",
+    "monthlyFiles": "Monthly files",
+    "singleFileName": "Single file name",
+    "monthFileTemplate": "Month file template",
+    "defaults": "Defaults",
+    "defaultTag": "Default tag",
+    "defaultCurrency": "Default currency",
+    "lookaheadDays": "Lookahead days",
+    "savedToast": "Settings saved",
+    "saveFailedToast": "Couldn't save",
+    "save": "Save",
+    "saved": "Saved"
+  }
+}

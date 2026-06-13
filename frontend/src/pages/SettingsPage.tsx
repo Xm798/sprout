@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { Save } from "lucide-react";
 import { toast } from "sonner";
+import { useTranslation } from "react-i18next";
 
 import { useConfig, useCurrencies, useUpdateConfig } from "@/api/hooks";
 import type { AppConfig } from "@/api/types";
@@ -26,6 +27,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 
 export function SettingsPage() {
+  const { t } = useTranslation();
   const config = useConfig();
   const currencies = useCurrencies();
   const update = useUpdateConfig();
@@ -43,9 +45,9 @@ export function SettingsPage() {
     e.preventDefault();
     if (form)
       update.mutate(form, {
-        onSuccess: () => toast.success("Settings saved"),
+        onSuccess: () => toast.success(t("settings.savedToast")),
         onError: (err) =>
-          toast.error("Couldn't save", { description: String(err) }),
+          toast.error(t("settings.saveFailedToast"), { description: String(err) }),
       });
   }
 
@@ -53,10 +55,10 @@ export function SettingsPage() {
     <div className="mx-auto max-w-2xl space-y-6">
       <header className="space-y-1">
         <h1 className="font-display text-3xl font-semibold tracking-tight">
-          Settings
+          {t("settings.title")}
         </h1>
         <p className="text-sm text-muted-foreground">
-          Where and how Sprout writes Beancount transactions.
+          {t("settings.subtitle")}
         </p>
       </header>
 
@@ -66,21 +68,21 @@ export function SettingsPage() {
         <form onSubmit={submit} className="space-y-6">
           <Card>
             <CardHeader>
-              <CardTitle>Ledger</CardTitle>
+              <CardTitle>{t("settings.ledger")}</CardTitle>
               <CardDescription>
-                Paths Sprout reads from and writes into.
+                {t("settings.ledgerDescription")}
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <Field
                 id="ledger_main_file"
-                label="Ledger main file"
+                label={t("settings.ledgerMainFile")}
                 value={form.ledger_main_file}
                 onChange={(v) => set("ledger_main_file", v)}
               />
               <Field
                 id="ledger_root"
-                label="Ledger root"
+                label={t("settings.ledgerRoot")}
                 value={form.ledger_root}
                 onChange={(v) => set("ledger_root", v)}
               />
@@ -89,38 +91,38 @@ export function SettingsPage() {
 
           <Card>
             <CardHeader>
-              <CardTitle>Write mode</CardTitle>
+              <CardTitle>{t("settings.writeMode")}</CardTitle>
               <CardDescription>
-                How confirmed transactions are organized on disk.
+                {t("settings.writeModeDescription")}
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-1.5">
-                <Label htmlFor="write_mode">Mode</Label>
+                <Label htmlFor="write_mode">{t("settings.mode")}</Label>
                 <Select
                   value={form.write_mode}
                   onValueChange={(v) => set("write_mode", v)}
                 >
-                  <SelectTrigger id="write_mode" aria-label="write mode">
+                  <SelectTrigger id="write_mode" aria-label={t("settings.writeModeAria")}>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="single_file">Single file</SelectItem>
+                    <SelectItem value="single_file">{t("settings.singleFile")}</SelectItem>
                     <SelectItem value="month_file">
-                      Monthly files
+                      {t("settings.monthlyFiles")}
                     </SelectItem>
                   </SelectContent>
                 </Select>
               </div>
               <Field
                 id="single_file_name"
-                label="Single file name"
+                label={t("settings.singleFileName")}
                 value={form.single_file_name}
                 onChange={(v) => set("single_file_name", v)}
               />
               <Field
                 id="month_file_template"
-                label="Month file template"
+                label={t("settings.monthFileTemplate")}
                 value={form.month_file_template}
                 onChange={(v) => set("month_file_template", v)}
                 mono
@@ -130,17 +132,17 @@ export function SettingsPage() {
 
           <Card>
             <CardHeader>
-              <CardTitle>Defaults</CardTitle>
+              <CardTitle>{t("settings.defaults")}</CardTitle>
             </CardHeader>
             <CardContent className="grid gap-4 sm:grid-cols-2">
               <Field
                 id="default_tag"
-                label="Default tag"
+                label={t("settings.defaultTag")}
                 value={form.default_tag}
                 onChange={(v) => set("default_tag", v)}
               />
               <div className="space-y-1.5">
-                <Label htmlFor="default_currency">Default currency</Label>
+                <Label htmlFor="default_currency">{t("settings.defaultCurrency")}</Label>
                 <Combobox
                   id="default_currency"
                   value={form.default_currency}
@@ -151,7 +153,7 @@ export function SettingsPage() {
                 />
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="lookahead_days">Lookahead days</Label>
+                <Label htmlFor="lookahead_days">{t("settings.lookaheadDays")}</Label>
                 <Input
                   id="lookahead_days"
                   type="number"
@@ -167,10 +169,10 @@ export function SettingsPage() {
           <div className="flex items-center gap-3">
             <Button type="submit" disabled={update.isPending}>
               <Save className="h-4 w-4" />
-              {update.isPending ? "Saving…" : "Save"}
+              {update.isPending ? t("common.saving") : t("settings.save")}
             </Button>
             {update.isSuccess && (
-              <span className="text-sm text-success">Saved</span>
+              <span className="text-sm text-success">{t("settings.saved")}</span>
             )}
           </div>
         </form>

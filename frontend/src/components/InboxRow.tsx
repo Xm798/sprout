@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Check, ChevronDown, SkipForward } from "lucide-react";
 import { toast } from "sonner";
+import { useTranslation } from "react-i18next";
 
 import { useConfirm, usePreview, useSkip } from "@/api/hooks";
 import { analyzeFlow, headlineDisplay, headlineLeg } from "@/api/postings";
@@ -22,6 +23,7 @@ export function InboxRow({
   occurrence: Occurrence;
   schedule?: Schedule;
 }) {
+  const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
   const [amount, setAmount] = useState("");
   const [date, setDate] = useState("");
@@ -30,7 +32,7 @@ export function InboxRow({
   const confirm = useConfirm();
   const skip = useSkip();
 
-  const name = schedule?.name ?? `Schedule ${occurrence.schedule_id}`;
+  const name = schedule?.name ?? t("common.scheduleFallback", { id: occurrence.schedule_id });
   // Headline = net flow of the auto-balance leg; edits in this row still tune
   // the first amount-bearing leg.
   const flow = analyzeFlow(schedule?.postings, occurrence.override_amounts);
@@ -66,9 +68,9 @@ export function InboxRow({
     confirm.mutate(
       { id: occurrence.id, body: buildBody() },
       {
-        onSuccess: () => toast.success(`Confirmed ${name}`),
+        onSuccess: () => toast.success(t("inboxRow.confirmedToast", { name })),
         onError: (e) =>
-          toast.error(`Couldn't confirm ${name}`, {
+          toast.error(t("inboxRow.confirmFailedToast", { name }), {
             description: errorMessage(e),
           }),
       }
@@ -77,7 +79,7 @@ export function InboxRow({
 
   function onSkip() {
     skip.mutate(occurrence.id, {
-      onSuccess: () => toast(`Skipped ${name}`),
+      onSuccess: () => toast(t("inboxRow.skippedToast", { name })),
     });
   }
 
@@ -89,15 +91,13 @@ export function InboxRow({
             <h3 className="truncate font-display text-base font-semibold">
               {name}
             </h3>
-            <Badge variant="warning" className="capitalize">
-              {occurrence.status}
-            </Badge>
+            <Badge variant="warning">{t(`common.status.${occurrence.status}`)}</Badge>
           </div>
           <div className="flex min-w-0 items-center gap-1.5 text-sm text-muted-foreground">
             <FlowAccounts flow={flow} />
           </div>
           <p className="text-xs text-muted-foreground">
-            Due {formatDate(effectiveDate)}
+            {t("inboxRow.due", { date: formatDate(effectiveDate) })}
           </p>
         </div>
 
@@ -118,7 +118,7 @@ export function InboxRow({
           className="flex-1 sm:flex-none"
         >
           <Check className="h-4 w-4" />
-          Confirm
+          {t("inboxRow.confirm")}
         </Button>
         <Button
           size="sm"
@@ -128,7 +128,7 @@ export function InboxRow({
           className="flex-1 sm:flex-none"
         >
           <SkipForward className="h-4 w-4" />
-          Skip
+          {t("inboxRow.skip")}
         </Button>
         <Button
           size="sm"
@@ -137,7 +137,7 @@ export function InboxRow({
           aria-expanded={expanded}
           onClick={() => setExpanded((v) => !v)}
         >
-          {expanded ? "Hide" : "Preview"}
+          {expanded ? t("inboxRow.hide") : t("inboxRow.preview")}
           <ChevronDown
             className={cn(
               "h-4 w-4 transition-transform",
@@ -152,7 +152,7 @@ export function InboxRow({
           <div className="grid gap-3 sm:grid-cols-3">
             <div className="space-y-1.5">
               <Label htmlFor={`${fieldId}-amount`}>
-                Amount{amountLeg ? ` · ${leafAccount(amountLeg.account)}` : ""}
+                {t("inboxRow.amount")}{amountLeg ? ` · ${leafAccount(amountLeg.account)}` : ""}
               </Label>
               <Input
                 id={`${fieldId}-amount`}
@@ -164,19 +164,19 @@ export function InboxRow({
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor={`${fieldId}-date`}>Date</Label>
+              <Label htmlFor={`${fieldId}-date`}>{t("inboxRow.date")}</Label>
               <DatePicker
                 id={`${fieldId}-date`}
-                aria-label="Override date"
+                aria-label={t("inboxRow.overrideDate")}
                 value={date}
                 onChange={setDate}
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor={`${fieldId}-narration`}>Narration</Label>
+              <Label htmlFor={`${fieldId}-narration`}>{t("inboxRow.narration")}</Label>
               <Input
                 id={`${fieldId}-narration`}
-                placeholder="Override narration"
+                placeholder={t("inboxRow.overrideNarration")}
                 value={narration}
                 onChange={(e) => setNarration(e.target.value)}
               />
@@ -184,12 +184,12 @@ export function InboxRow({
           </div>
 
           <div className="space-y-1.5">
-            <Label>Beancount preview</Label>
+            <Label>{t("inboxRow.beancountPreview")}</Label>
             <pre className="max-h-56 overflow-auto rounded-lg border border-border/60 bg-background/80 p-3 font-mono text-xs leading-relaxed text-foreground/90">
               {preview.isLoading
-                ? "Loading…"
+                ? t("common.loading")
                 : preview.isError
-                  ? "Failed to render preview."
+                  ? t("inboxRow.previewFailed")
                   : preview.data?.text ?? ""}
             </pre>
           </div>

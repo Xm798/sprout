@@ -1,5 +1,7 @@
 import { useRef, useState } from "react";
 import { CalendarPlus, Pencil, Plus, Repeat, Trash2 } from "lucide-react";
+import type { TFunction } from "i18next";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 
 import { useDeleteSchedule, useSchedules } from "@/api/hooks";
@@ -30,11 +32,12 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { formatAmount } from "@/lib/utils";
 
-function intervalLabel(s: Schedule) {
-  const unit = s.interval_count === 1 ? s.interval_unit : `${s.interval_unit}s`;
+function intervalLabel(s: Schedule, t: TFunction) {
   return s.interval_count === 1
-    ? `Every ${unit}`
-    : `Every ${s.interval_count} ${unit}`;
+    ? t(`schedules.everyOne.${s.interval_unit}`)
+    : t(`schedules.everyMany.${s.interval_unit}`, {
+        count: s.interval_count,
+      });
 }
 
 function ScheduleCard({
@@ -44,6 +47,7 @@ function ScheduleCard({
   schedule: Schedule;
   isDesktop: boolean;
 }) {
+  const { t } = useTranslation();
   const del = useDeleteSchedule();
   const [editOpen, setEditOpen] = useState(false);
   const editTriggerRef = useRef<HTMLButtonElement>(null);
@@ -74,7 +78,7 @@ function ScheduleCard({
               {schedule.name}
             </p>
             <div className="flex flex-wrap items-center gap-1.5">
-              <Badge variant="outline">{intervalLabel(schedule)}</Badge>
+              <Badge variant="outline">{intervalLabel(schedule, t)}</Badge>
               <span className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
                 <FlowAccounts flow={flow} leafNames={false} />
               </span>
@@ -91,7 +95,7 @@ function ScheduleCard({
               variant="ghost"
               size="icon"
               className="h-8 w-8 text-muted-foreground"
-              aria-label={`Edit ${schedule.name}`}
+              aria-label={t("schedules.editAria", { name: schedule.name })}
               onClick={() => setEditOpen(true)}
             >
               <Pencil className="h-4 w-4" />
@@ -100,11 +104,11 @@ function ScheduleCard({
               variant="ghost"
               size="icon"
               className="h-8 w-8 text-muted-foreground hover:text-destructive"
-              aria-label={`Delete ${schedule.name}`}
+              aria-label={t("schedules.deleteAria", { name: schedule.name })}
               disabled={del.isPending}
               onClick={() =>
                 del.mutate(schedule.id, {
-                  onSuccess: () => toast(`Deleted ${schedule.name}`),
+                  onSuccess: () => toast(t("schedules.deletedToast", { name: schedule.name })),
                 })
               }
             >
@@ -120,10 +124,9 @@ function ScheduleCard({
             onCloseAutoFocus={restoreEditFocus}
           >
             <DialogHeader>
-              <DialogTitle>Edit schedule</DialogTitle>
+              <DialogTitle>{t("schedules.editSchedule")}</DialogTitle>
               <DialogDescription>
-                Changes apply to upcoming occurrences; confirmed history stays
-                put.
+                {t("schedules.editDescription")}
               </DialogDescription>
             </DialogHeader>
             {editForm}
@@ -137,10 +140,9 @@ function ScheduleCard({
             onCloseAutoFocus={restoreEditFocus}
           >
             <SheetHeader className="mb-4 text-left">
-              <SheetTitle>Edit schedule</SheetTitle>
+              <SheetTitle>{t("schedules.editSchedule")}</SheetTitle>
               <SheetDescription>
-                Changes apply to upcoming occurrences; confirmed history stays
-                put.
+                {t("schedules.editDescription")}
               </SheetDescription>
             </SheetHeader>
             {editForm}
@@ -152,6 +154,7 @@ function ScheduleCard({
 }
 
 export function SchedulesPage() {
+  const { t } = useTranslation();
   const schedules = useSchedules();
   const [open, setOpen] = useState(false);
   const isDesktop = useMediaQuery("(min-width: 768px)");
@@ -160,7 +163,7 @@ export function SchedulesPage() {
   const trigger = (
     <Button>
       <Plus className="h-4 w-4" />
-      New schedule
+      {t("schedules.newSchedule")}
     </Button>
   );
 
@@ -171,10 +174,10 @@ export function SchedulesPage() {
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div className="space-y-1">
           <h1 className="font-display text-3xl font-semibold tracking-tight">
-            Schedules
+            {t("schedules.title")}
           </h1>
           <p className="text-sm text-muted-foreground">
-            Recurring payments that feed your inbox.
+            {t("schedules.subtitle")}
           </p>
         </div>
 
@@ -183,10 +186,9 @@ export function SchedulesPage() {
             <DialogTrigger asChild>{trigger}</DialogTrigger>
             <DialogContent className="max-h-[90vh] overflow-y-auto [scrollbar-gutter:stable]">
               <DialogHeader>
-                <DialogTitle>New schedule</DialogTitle>
+                <DialogTitle>{t("schedules.newSchedule")}</DialogTitle>
                 <DialogDescription>
-                  Define a recurring payment. It'll surface in your inbox when
-                  due.
+                  {t("schedules.dialogDescription")}
                 </DialogDescription>
               </DialogHeader>
               {form}
@@ -200,9 +202,9 @@ export function SchedulesPage() {
               className="max-h-[92vh] overflow-y-auto p-6 pb-8 [scrollbar-gutter:stable]"
             >
               <SheetHeader className="mb-4 text-left">
-                <SheetTitle>New schedule</SheetTitle>
+                <SheetTitle>{t("schedules.newSchedule")}</SheetTitle>
                 <SheetDescription>
-                  Define a recurring payment.
+                  {t("schedules.sheetDescription")}
                 </SheetDescription>
               </SheetHeader>
               {form}
@@ -225,15 +227,15 @@ export function SchedulesPage() {
             </span>
             <div className="space-y-1">
               <p className="font-display text-lg font-semibold">
-                No schedules yet
+                {t("schedules.emptyTitle")}
               </p>
               <p className="text-sm text-muted-foreground">
-                Create your first recurring payment to get started.
+                {t("schedules.emptyBody")}
               </p>
             </div>
             <Button className="mt-1" onClick={() => setOpen(true)}>
               <Plus className="h-4 w-4" />
-              New schedule
+              {t("schedules.newSchedule")}
             </Button>
           </CardContent>
         </Card>
