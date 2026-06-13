@@ -28,3 +28,10 @@ export function formatAmount(amount: string | number, currency?: string) {
   }).format(n);
   return currency ? `${body} ${currency}` : body;
 }
+
+/** Last segment of a Beancount account, for compact display. */
+export function leafAccount(account?: string) {
+  if (!account) return "—";
+  const parts = account.split(":");
+  return parts[parts.length - 1] || account;
+}

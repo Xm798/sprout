@@ -16,7 +16,7 @@ import {
   useUnskip,
   useWritten,
 } from "@/api/hooks";
-import { effectiveHeadlineAmount } from "@/api/postings";
+import { analyzeFlow, headlineDisplay } from "@/api/postings";
 import type { Occurrence, Schedule } from "@/api/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -151,7 +151,8 @@ function HistoryRow({
   const unskip = useUnskip();
   const [editOpen, setEditOpen] = useState(false);
   const name = schedule?.name ?? `Schedule ${occurrence.schedule_id}`;
-  const amount = effectiveHeadlineAmount(occurrence, schedule) ?? "";
+  const flow = analyzeFlow(schedule?.postings, occurrence.override_amounts);
+  const { amount = "", currency } = headlineDisplay(flow, schedule);
   const effectiveDate = occurrence.override_date ?? occurrence.due_date;
   const file = writtenFile(occurrence.written_path, ledgerRoot);
   const confirmed = occurrence.status === "confirmed";
@@ -217,7 +218,7 @@ function HistoryRow({
 
         <div className="flex flex-wrap items-center gap-3">
           <div className="text-right font-mono text-lg font-semibold tabular-nums">
-            {formatAmount(amount, schedule?.headline_currency ?? undefined)}
+            {formatAmount(amount, currency)}
           </div>
           {confirmed && !missing && (
             <Button size="sm" variant="outline" onClick={() => setEditOpen(true)}>

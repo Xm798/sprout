@@ -2,7 +2,7 @@ import { CheckCheck } from "lucide-react";
 import { toast } from "sonner";
 
 import { useConfirm, useInbox, useSchedules } from "@/api/hooks";
-import { effectiveHeadlineAmount } from "@/api/postings";
+import { analyzeFlow, headlineDisplay } from "@/api/postings";
 import { InboxRow } from "@/components/InboxRow";
 import { SproutMark } from "@/components/logo";
 import { Button } from "@/components/ui/button";
@@ -18,12 +18,12 @@ export function InboxPage() {
   const byId = new Map((schedules.data ?? []).map((s) => [s.id, s]));
   const items = inbox.data ?? [];
 
-  // Sum the headline amount due per currency, using per-leg overrides where present.
+  // Sum the net headline amount due per currency, using per-leg overrides where present.
   const totals = new Map<string, number>();
   for (const occ of items) {
     const sch = byId.get(occ.schedule_id);
-    const raw = effectiveHeadlineAmount(occ, sch);
-    const currency = sch?.headline_currency ?? "";
+    const flow = analyzeFlow(sch?.postings, occ.override_amounts);
+    const { amount: raw, currency = "" } = headlineDisplay(flow, sch);
     const n = Number(raw);
     if (!Number.isNaN(n)) totals.set(currency, (totals.get(currency) ?? 0) + n);
   }

@@ -79,3 +79,45 @@ test("expanding shows the .bean preview", async () => {
   await user.click(screen.getByRole("button", { name: /preview/i }));
   expect(await screen.findByText(/2026-06-15 \* "Spotify"/)).toBeInTheDocument();
 });
+
+const payrollSchedule: Schedule = {
+  ...schedule,
+  id: 8,
+  name: "Payroll",
+  postings: [
+    { id: "s1", account: "Income:Salary", amount: "-10000", currency: "CNY" },
+    { id: "s2", account: "Expenses:Tax", amount: "1000", currency: "CNY" },
+    { id: "s3", account: "Expenses:Social", amount: "500", currency: "CNY" },
+    { id: "s4", account: "Assets:Bank:8888", amount: null, currency: null },
+  ],
+  headline_amount: "-10000",
+  headline_currency: "CNY",
+};
+
+test("multi-posting: net amount, both sides, +N badge", () => {
+  renderWithProviders(
+    <InboxRow occurrence={{ ...occurrence, schedule_id: 8 }} schedule={payrollSchedule} />
+  );
+  expect(screen.getByText(/8,500\.00/)).toBeInTheDocument(); // net to bank, not -10000
+  expect(screen.getByText("Salary")).toBeInTheDocument(); // source leaf
+  expect(screen.getByText("Tax")).toBeInTheDocument(); // first destination (mobile cap = 1)
+  expect(screen.getByText("+2")).toBeInTheDocument(); // Social + Bank folded
+});
+
+test("two-leg direction reads fund account → expense account", () => {
+  renderWithProviders(<InboxRow occurrence={occurrence} schedule={schedule} />);
+  const src = screen.getByText("CreditCard");
+  const dst = screen.getByText("Subscription");
+  expect(
+    src.compareDocumentPosition(dst) & Node.DOCUMENT_POSITION_FOLLOWING
+  ).toBeTruthy();
+});
+
+test("amount input placeholder shows the editable leg's own amount, not the net", async () => {
+  const user = userEvent.setup();
+  renderWithProviders(
+    <InboxRow occurrence={{ ...occurrence, schedule_id: 8 }} schedule={payrollSchedule} />
+  );
+  await user.click(screen.getByRole("button", { name: /preview/i }));
+  expect(screen.getByLabelText(/^amount/i)).toHaveAttribute("placeholder", "-10000");
+});

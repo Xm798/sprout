@@ -37,7 +37,7 @@ export interface ScheduleCreate {
 
 export interface Schedule extends ScheduleCreate {
   id: number;
-  headline_amount?: string | null; // first amount-bearing leg, for list/summary views
+  headline_amount?: string | null; // first amount-bearing leg; display fallback when analyzeFlow can't compute
   headline_currency?: string | null;
   created_at: string;
   updated_at: string;
