@@ -31,6 +31,19 @@ export function useCreateSchedule() {
   });
 }
 
+export function useUpdateSchedule() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: number; body: ScheduleCreate }) =>
+      api.updateSchedule(id, body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: qk.schedules });
+      // Editing the rule can delete (or later add) pending occurrences.
+      qc.invalidateQueries({ queryKey: qk.inbox });
+    },
+  });
+}
+
 export function useDeleteSchedule() {
   const qc = useQueryClient();
   return useMutation({

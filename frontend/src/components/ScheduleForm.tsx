@@ -4,8 +4,22 @@ import { Plus, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 
-import { useAccounts, useBeanFiles, useConfig, useCreateSchedule, useCurrencies } from "@/api/hooks";
-import type { IntervalUnit, Posting, ScheduleCreate } from "@/api/types";
+import {
+  useAccounts,
+  useBeanFiles,
+  useConfig,
+  useCreateSchedule,
+  useCurrencies,
+  useUpdateSchedule,
+} from "@/api/hooks";
+import type {
+  Cost,
+  IntervalUnit,
+  Posting,
+  Price,
+  Schedule,
+  ScheduleCreate,
+} from "@/api/types";
 import { Button } from "@/components/ui/button";
 import { Combobox } from "@/components/ui/combobox";
 import { DatePicker } from "@/components/ui/date-picker";
@@ -22,11 +36,15 @@ import { errorMessage } from "@/lib/utils";
 
 // Editing shape: amounts/currencies stay plain strings while typing; an empty
 // amount marks an auto-balance leg and is serialized to null on submit.
+// cost/price have no form UI but must round-trip untouched when editing a
+// schedule that carries them (e.g. created via the API).
 interface DraftPosting {
   id: string;
   account: string;
   amount: string;
   currency: string;
+  cost?: Cost | null;
+  price?: Price | null;
 }
 
 type Draft = Omit<ScheduleCreate, "postings" | "target_file"> & {
@@ -55,34 +73,80 @@ function emptyDraft(currency: string): Draft {
   };
 }
 
+// Map a stored schedule back into the editable draft shape. Posting ids are
+// preserved so the backend can keep per-leg overrides on untouched legs.
+function scheduleToDraft(s: Schedule): Draft {
+  return {
+    name: s.name,
+    narration: s.narration,
+    interval_unit: s.interval_unit,
+    interval_count: s.interval_count,
+    anchor_date: s.anchor_date,
+    end_date: s.end_date,
+    max_count: s.max_count,
+    tags: s.tags,
+    status: s.status,
+    target_file: s.target_file ?? "",
+    postings: s.postings.map((p) => ({
+      id: p.id,
+      account: p.account,
+      amount: p.amount ?? "",
+      currency: p.currency ?? "",
+      cost: p.cost,
+      price: p.price,
+    })),
+  };
+}
+
 function toPayload(draft: Draft): ScheduleCreate {
   const postings: Posting[] = draft.postings.map((p) => {
     const amount = p.amount.trim();
     const account = p.account.trim();
+    // Blanking the amount turns the leg into an auto-balance leg, which
+    // cannot carry cost/price; otherwise annotations pass through untouched.
     return amount === ""
       ? { id: p.id, account, amount: null, currency: null }
-      : { id: p.id, account, amount, currency: p.currency };
+      : {
+          id: p.id,
+          account,
+          amount,
+          currency: p.currency,
+          cost: p.cost ?? null,
+          price: p.price ?? null,
+        };
   });
   return { ...draft, target_file: draft.target_file.trim() || null, postings };
 }
 
 const UNITS: IntervalUnit[] = ["day", "week", "month", "quarter", "year"];
 
-export function ScheduleForm({ onCreated }: { onCreated?: () => void }) {
+export function ScheduleForm({
+  schedule,
+  onSaved,
+}: {
+  schedule?: Schedule; // present = edit mode
+  onSaved?: () => void;
+}) {
   const { t } = useTranslation();
   const config = useConfig();
   const defaultCurrency = config.data?.default_currency || "USD";
-  const [draft, setDraft] = useState<Draft>(() => emptyDraft(defaultCurrency));
+  const [draft, setDraft] = useState<Draft>(() =>
+    schedule ? scheduleToDraft(schedule) : emptyDraft(defaultCurrency)
+  );
   // The config arrives async; refresh the default currency on a form the user
-  // hasn't touched yet, without clobbering in-progress input.
+  // hasn't touched yet, without clobbering in-progress input or a prefilled edit.
   const touched = useRef(false);
+  // `schedule` is fixed for a mount (edit dialogs remount per open), so the
+  // only live dependency is the currency.
   useEffect(() => {
-    if (!touched.current) setDraft(emptyDraft(defaultCurrency));
+    if (!schedule && !touched.current) setDraft(emptyDraft(defaultCurrency));
   }, [defaultCurrency]);
   const accounts = useAccounts();
   const currencies = useCurrencies();
   const beanFiles = useBeanFiles();
   const create = useCreateSchedule();
+  const update = useUpdateSchedule();
+  const saving = create.isPending || update.isPending;
 
   const accountOptions = accounts.data ?? [];
   const currencyOptions = currencies.data ?? [];
@@ -121,11 +185,24 @@ export function ScheduleForm({ onCreated }: { onCreated?: () => void }) {
 
   function submit(e: FormEvent) {
     e.preventDefault();
+    if (schedule) {
+      update.mutate(
+        { id: schedule.id, body: toPayload(draft) },
+        {
+          onSuccess: () => onSaved?.(),
+          onError: (err) =>
+            toast.error(t("scheduleForm.updateFailedToast"), {
+              description: errorMessage(err),
+            }),
+        }
+      );
+      return;
+    }
     create.mutate(toPayload(draft), {
       onSuccess: () => {
         setDraft(emptyDraft(defaultCurrency));
         touched.current = false;
-        onCreated?.();
+        onSaved?.();
       },
       onError: (err) =>
         toast.error(t("scheduleForm.createFailedToast"), {
@@ -283,8 +360,8 @@ export function ScheduleForm({ onCreated }: { onCreated?: () => void }) {
         )}
       </div>
 
-      <Button type="submit" disabled={create.isPending} className="w-full">
-        {create.isPending ? t("common.saving") : t("scheduleForm.create")}
+      <Button type="submit" disabled={saving} className="w-full">
+        {saving ? t("common.saving") : schedule ? t("scheduleForm.saveChanges") : t("scheduleForm.create")}
       </Button>
     </form>
   );

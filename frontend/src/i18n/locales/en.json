@@ -96,6 +96,9 @@
     "emptyBody": "Create your first recurring payment to get started.",
     "deletedToast": "Deleted {{name}}",
     "deleteAria": "Delete {{name}}",
+    "editSchedule": "Edit schedule",
+    "editAria": "Edit {{name}}",
+    "editDescription": "Changes apply to upcoming occurrences; confirmed history stays put.",
     "everyOne": {
       "day": "Every day",
       "week": "Every week",
@@ -141,7 +144,9 @@
     "targetFilePlaceholder": "Default (global write mode)",
     "newFileHint": "New file — it will be created and included in the main ledger automatically.",
     "createFailedToast": "Couldn't create schedule",
-    "create": "Create schedule"
+    "create": "Create schedule",
+    "saveChanges": "Save changes",
+    "updateFailedToast": "Couldn't update schedule"
   },
   "settings": {
     "title": "Settings",

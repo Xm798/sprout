@@ -94,6 +94,9 @@
     "emptyBody": "创建你的第一笔周期付款吧。",
     "deletedToast": "已删除 {{name}}",
     "deleteAria": "删除 {{name}}",
+    "editSchedule": "编辑计划",
+    "editAria": "编辑 {{name}}",
+    "editDescription": "更改只影响未来的事项；已确认的历史保持不变。",
     "everyOne": {
       "day": "每天",
       "week": "每周",
@@ -139,7 +142,9 @@
     "targetFilePlaceholder": "默认（全局写入模式）",
     "newFileHint": "新文件 — 会自动创建并 include 进主账本。",
     "createFailedToast": "无法创建计划",
-    "create": "创建计划"
+    "create": "创建计划",
+    "saveChanges": "保存更改",
+    "updateFailedToast": "无法更新计划"
   },
   "settings": {
     "title": "设置",
