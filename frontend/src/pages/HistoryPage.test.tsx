@@ -194,6 +194,29 @@ test("skipped row unskips on click", async () => {
   await waitFor(() => expect(api.unskip).toHaveBeenCalledWith(12));
 });
 
+test("multi-posting history row shows the net amount", async () => {
+  const payroll = {
+    ...schedule,
+    id: 2,
+    name: "Payroll",
+    postings: [
+      { id: "s1", account: "Income:Salary", amount: "-10000", currency: "CNY" },
+      { id: "s2", account: "Expenses:Tax", amount: "1000", currency: "CNY" },
+      { id: "s3", account: "Assets:Bank:8888", amount: null },
+    ],
+    headline_amount: "-10000",
+    headline_currency: "CNY",
+  };
+  mockAll();
+  (api.getHistory as ReturnType<typeof vi.fn>).mockResolvedValue([
+    { ...confirmedOcc, id: 13, schedule_id: 2 },
+  ]);
+  (api.listSchedules as ReturnType<typeof vi.fn>).mockResolvedValue([schedule, payroll]);
+  renderWithProviders(<HistoryPage />);
+  // Net to bank = -(-10000 + 1000) = 9000.
+  expect(await screen.findByText(/9,000\.00/)).toBeInTheDocument();
+});
+
 test("shows the check error without hiding history", async () => {
   mockAll();
   (api.checkHistory as ReturnType<typeof vi.fn>).mockRejectedValue(

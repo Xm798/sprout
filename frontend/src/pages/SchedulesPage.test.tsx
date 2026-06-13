@@ -6,10 +6,23 @@ import { makeSchedule, renderWithProviders } from "../test/utils";
 import { api } from "../api/client";
 
 const spotify = makeSchedule();
+const payroll = makeSchedule({
+  id: 8,
+  name: "Payroll",
+  narration: "monthly payroll",
+  postings: [
+    { id: "s1", account: "Income:Salary", amount: "-10000", currency: "CNY" },
+    { id: "s2", account: "Expenses:Tax", amount: "1000", currency: "CNY" },
+    { id: "s3", account: "Expenses:Social", amount: "500", currency: "CNY" },
+    { id: "s4", account: "Assets:Bank:8888", amount: null, currency: null },
+  ],
+  headline_amount: "-10000",
+  headline_currency: "CNY",
+});
 
 vi.mock("../api/client", () => ({
   api: {
-    listSchedules: vi.fn(() => Promise.resolve([spotify])),
+    listSchedules: vi.fn(() => Promise.resolve([spotify, payroll])),
     deleteSchedule: vi.fn().mockResolvedValue({ ok: true }),
     updateSchedule: vi.fn(() => Promise.resolve(spotify)),
     accounts: vi.fn().mockResolvedValue(["Assets:CreditCard", "Expenses:Subscription"]),
@@ -57,4 +70,13 @@ test("escape closes the edit form and returns focus to the pencil button", async
     expect(screen.queryByLabelText(/^name$/i)).not.toBeInTheDocument()
   );
   expect(editButton).toHaveFocus();
+});
+
+test("schedule card shows full-path flow, +N badge, and net amount", async () => {
+  renderWithProviders(<SchedulesPage />);
+  expect(await screen.findByText("Payroll")).toBeInTheDocument();
+  expect(screen.getByText("Income:Salary")).toBeInTheDocument(); // full path, not leaf
+  expect(screen.getByText("Expenses:Tax")).toBeInTheDocument(); // first destination (mobile cap)
+  expect(screen.getByText("+2")).toBeInTheDocument(); // Social + Bank folded
+  expect(screen.getByText(/8,500\.00/)).toBeInTheDocument(); // net, not -10000
 });

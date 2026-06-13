@@ -5,8 +5,9 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 
 import { useDeleteSchedule, useSchedules } from "@/api/hooks";
-import { balanceLeg, headlineLeg } from "@/api/postings";
+import { analyzeFlow, headlineDisplay } from "@/api/postings";
 import type { Schedule } from "@/api/types";
+import { FlowAccounts } from "@/components/FlowAccounts";
 import { ScheduleForm } from "@/components/ScheduleForm";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -39,18 +40,6 @@ function intervalLabel(s: Schedule, t: TFunction) {
       });
 }
 
-// "Expenses:Sub → Assets:Bank": the headline (first amount-bearing) leg flowing
-// into the auto-balance leg. Falls back to listing accounts when no blank leg.
-function postingsSummary(s: Schedule): string {
-  const amountLeg = headlineLeg(s.postings);
-  const blankLeg = balanceLeg(s.postings);
-  if (amountLeg && blankLeg) return `${amountLeg.account} → ${blankLeg.account}`;
-  return s.postings
-    .map((p) => p.account)
-    .filter(Boolean)
-    .join(" · ");
-}
-
 function ScheduleCard({
   schedule,
   isDesktop,
@@ -62,6 +51,8 @@ function ScheduleCard({
   const del = useDeleteSchedule();
   const [editOpen, setEditOpen] = useState(false);
   const editTriggerRef = useRef<HTMLButtonElement>(null);
+  const flow = analyzeFlow(schedule.postings);
+  const { amount, currency } = headlineDisplay(flow, schedule);
 
   // The edit dialog is controlled without a Radix trigger, so its default
   // close-focus return targets a null ref; restore focus to the pencil
@@ -88,20 +79,15 @@ function ScheduleCard({
             </p>
             <div className="flex flex-wrap items-center gap-1.5">
               <Badge variant="outline">{intervalLabel(schedule, t)}</Badge>
-              <span className="truncate text-xs text-muted-foreground">
-                {postingsSummary(schedule)}
+              <span className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
+                <FlowAccounts flow={flow} leafNames={false} />
               </span>
             </div>
           </div>
         </div>
         <div className="flex shrink-0 flex-col items-end gap-1.5">
           <span className="font-mono text-sm font-semibold tabular-nums">
-            {schedule.headline_amount != null
-              ? formatAmount(
-                  schedule.headline_amount,
-                  schedule.headline_currency ?? undefined
-                )
-              : "—"}
+            {amount != null ? formatAmount(amount, currency) : "—"}
           </span>
           <div className="flex items-center gap-0.5">
             <Button

@@ -12,3 +12,6 @@ dist/
 # Internal planning notes — keep local, never commit
 docs/plans/
 docs/specs/
+
+# Brainstorming visual companion sessions
+.superpowers/

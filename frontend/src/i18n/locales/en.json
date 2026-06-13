@@ -19,6 +19,9 @@
     "today": "Today",
     "clear": "Clear"
   },
+  "flowAccounts": {
+    "moreCount": "+{{count}} more: {{names}}"
+  },
   "common": {
     "loading": "Loading…",
     "saving": "Saving…",

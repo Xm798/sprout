@@ -19,6 +19,9 @@
     "today": "今天",
     "clear": "清除"
   },
+  "flowAccounts": {
+    "moreCount": "还有 {{count}} 个：{{names}}"
+  },
   "common": {
     "loading": "加载中…",
     "saving": "保存中…",
