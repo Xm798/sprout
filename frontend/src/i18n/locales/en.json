@@ -8,6 +8,10 @@
   "langToggle": {
     "label": "Switch language"
   },
+  "pwaUpdate": {
+    "title": "A new version is available",
+    "refresh": "Refresh"
+  },
   "modeToggle": {
     "label": "Toggle theme",
     "light": "Light",

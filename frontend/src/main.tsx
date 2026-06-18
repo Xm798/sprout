@@ -5,6 +5,7 @@ import { BrowserRouter } from "react-router-dom";
 import { ThemeProvider } from "next-themes";
 
 import App from "./App";
+import { PwaUpdatePrompt } from "@/components/pwa-update-prompt";
 import { Toaster } from "@/components/ui/sonner";
 import "./index.css";
 import "./i18n";
@@ -27,6 +28,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
           <App />
         </BrowserRouter>
         <Toaster />
+        <PwaUpdatePrompt />
       </QueryClientProvider>
     </ThemeProvider>
   </React.StrictMode>
