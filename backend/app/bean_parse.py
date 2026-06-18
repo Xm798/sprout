@@ -24,7 +24,7 @@ class ParseError(Exception):
 
 
 class ParsedTransaction(BaseModel):
-    name: str
+    payee: str
     narration: str
     postings: list[Posting]
     tags: str                  # comma-joined, sorted (matches ScheduleBase.tags)
@@ -93,7 +93,8 @@ def parse_transaction(text: str) -> ParsedTransaction:
     lines = text.splitlines()
     postings = [_map_posting(p, lines) for p in txn.postings]
     return ParsedTransaction(
-        name=txn.payee or "",
+        # name is Sprout-internal and never parsed; payee + narration round-trip.
+        payee=txn.payee or "",
         narration=txn.narration or "",
         postings=postings,
         tags=",".join(sorted(txn.tags)) if txn.tags else "",

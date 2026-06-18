@@ -22,7 +22,8 @@ export interface Posting {
 }
 
 export interface ScheduleCreate {
-  name: string;
+  name: string; // Sprout-internal label; never written to the ledger
+  payee: string; // bean payee
   narration: string;
   postings: Posting[];
   interval_unit: IntervalUnit;
@@ -41,8 +42,9 @@ export interface ParseBeanRequest {
 
 // Transaction-level fields parsed from pasted bean text; recurrence fields are
 // filled in by the user. anchor_date is the wire format (ISO date string).
+// No `name`: the schedule name is internal to Sprout and never parsed from bean.
 export interface ParsedTransaction {
-  name: string;
+  payee: string;
   narration: string;
   postings: Posting[];
   tags: string;

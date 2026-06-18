@@ -23,7 +23,7 @@ const occurrence: Occurrence = {
 };
 
 const schedule: Schedule = {
-  id: 7, name: "Spotify", narration: "sub",
+  id: 7, name: "Spotify", payee: "Spotify AB", narration: "sub",
   postings: [
     { id: "p1", account: "Expenses:Subscription", amount: "15.00", currency: "USD" },
     { id: "p2", account: "Assets:CreditCard", amount: null, currency: null },

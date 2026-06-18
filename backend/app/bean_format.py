@@ -50,7 +50,11 @@ def format_transaction(
 ) -> str:
     tags = tags or []
     tag_str = "".join(f" #{t}" for t in tags)
-    lines = [f'{date.isoformat()} {flag} "{payee}" "{narration}"{tag_str}']
+    # With a payee, both strings are emitted; without one, a lone string is the
+    # narration (beancount treats a single quoted string as narration, no payee).
+    # The schedule `name` is Sprout-internal and never written to the ledger.
+    payee_prefix = f'"{payee}" ' if payee else ""
+    lines = [f'{date.isoformat()} {flag} {payee_prefix}"{narration}"{tag_str}']
     if meta:
         for key, value in meta.items():
             lines.append(f'  {key}: "{value}"')

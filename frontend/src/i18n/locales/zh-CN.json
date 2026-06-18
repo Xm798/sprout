@@ -118,6 +118,8 @@
   "scheduleForm": {
     "name": "名称",
     "namePlaceholder": "例如 Netflix",
+    "payee": "收款方",
+    "payeePlaceholder": "可选的 bean payee",
     "postings": "分录",
     "addPosting": "添加分录",
     "postingN": "分录 {{n}}",

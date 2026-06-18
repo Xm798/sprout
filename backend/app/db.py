@@ -173,6 +173,7 @@ def migrate_legacy_schema(engine) -> None:
     if occ_cols and "override_amount" in occ_cols:
         _migrate_occurrence(engine)
     _add_column_if_missing(engine, "schedule", "target_file", "VARCHAR")
+    _add_column_if_missing(engine, "schedule", "payee", "VARCHAR NOT NULL DEFAULT ''")
     _add_column_if_missing(
         engine, "appconfig", "default_currency", "VARCHAR NOT NULL DEFAULT 'USD'"
     )

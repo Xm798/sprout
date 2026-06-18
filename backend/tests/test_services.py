@@ -20,7 +20,7 @@ def _postings():
 
 def _make_schedule(session):
     sch = Schedule(
-        name="Spotify", narration="sub", postings=_postings(),
+        name="Spotify", payee="Spotify AB", narration="sub", postings=_postings(),
         interval_unit="month", interval_count=1,
         anchor_date=datetime.date(2026, 1, 15), max_count=6, tags="sprout",
     )
@@ -65,7 +65,7 @@ def test_preview_renders_expected_text(session, config, today):
     services.materialize_occurrences(session, config, today)
     occ = _first_occ(session, sch)
     text = services.build_preview(session, config, occ.id)
-    assert '"Spotify" "sub" #sprout' in text
+    assert '"Spotify AB" "sub" #sprout' in text  # payee + narration; name stays internal
     assert f'sprout-id: "{occ.sprout_id}"' in text
     # beanfmt aligns the amount column, so match whitespace flexibly
     assert re.search(r"Expenses:Subscription\s+15\.00 USD", text)
@@ -415,7 +415,7 @@ def test_confirm_writes_to_schedule_target_file(session, tmp_ledger_config, toda
 
     root = Path(tmp_ledger_config.ledger_root)
     target = root / "subscriptions.bean"
-    assert "Spotify" in target.read_text()
+    assert '"Spotify AB" "sub"' in target.read_text()  # payee + narration written
     assert not (root / "sprout.bean").exists()  # global file untouched
     session.refresh(occ)
     assert occ.written_path == str(target)
