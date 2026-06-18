@@ -392,7 +392,8 @@ def test_parse_returns_transaction_fields(client):
     })
     assert r.status_code == 200, r.text
     body = r.json()
-    assert body["name"] == "Spotify"
+    assert "name" not in body  # name stays user-entered, never parsed from bean
+    assert body["payee"] == "Spotify"
     assert body["narration"] == "sub"
     assert body["anchor_date"] == "2026-06-15"
     assert body["tags"] == ""

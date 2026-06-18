@@ -20,7 +20,7 @@ vi.mock("../api/client", () => ({
 }));
 
 const PARSED = {
-  name: "Spotify",
+  payee: "Spotify",
   narration: "sub",
   tags: "music,sprout",
   anchor_date: "2026-06-15",
@@ -217,9 +217,12 @@ test("import fills the form from parsed bean text on a clean form, no confirm", 
 
   await openImportAndParse(user);
 
-  await waitFor(() => expect(screen.getByLabelText(/^name$/i)).toHaveValue("Spotify"));
+  await waitFor(() => expect(screen.getByLabelText(/^narration$/i)).toHaveValue("sub"));
+  expect(screen.getByLabelText(/^payee$/i)).toHaveValue("Spotify");
   expect(screen.getByLabelText(/amount 1/i)).toHaveValue("15.00");
   expect(screen.getByLabelText(/account 2/i)).toHaveValue("Assets:CreditCard");
+  // name is the schedule's own label — never overwritten by import
+  expect(screen.getByLabelText(/^name$/i)).toHaveValue("");
   // recurrence fields are left untouched at their defaults
   expect(screen.getByLabelText(/repeat count/i)).toHaveValue(1);
   expect(confirmSpy).not.toHaveBeenCalled();

@@ -9,7 +9,8 @@ from app.postings import Posting
 
 
 class ScheduleBase(SQLModel):
-    name: str
+    name: str          # Sprout-internal label; never written to the ledger
+    payee: str = ""    # bean payee
     narration: str = ""
     interval_unit: str  # day | week | month | quarter | year
     interval_count: int = 1

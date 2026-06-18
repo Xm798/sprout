@@ -135,7 +135,7 @@ def render_occurrence(
     date, narration = _effective_meta(occ, sch, override_date=override_date, override_narration=override_narration)
     tags = [t.strip() for t in sch.tags.split(",") if t.strip()]
     return format_transaction(
-        date=date, payee=sch.name, narration=narration, postings=effective_postings,
+        date=date, payee=sch.payee, narration=narration, postings=effective_postings,
         tags=tags, meta={"sprout-id": occ.sprout_id},
     )
 

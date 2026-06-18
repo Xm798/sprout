@@ -23,7 +23,7 @@ describe("api client", () => {
   it("POSTs createSchedule with a JSON body", async () => {
     const f = mockFetch({ id: 2 });
     await api.createSchedule({
-      name: "X", narration: "",
+      name: "X", payee: "", narration: "",
       postings: [
         { id: "a", account: "B", amount: "1", currency: "USD" },
         { id: "b", account: "A", amount: null, currency: null },

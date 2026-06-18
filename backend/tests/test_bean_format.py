@@ -29,15 +29,15 @@ def test_two_leg_with_tag_and_meta():
 def test_integer_amount_renders_bare():
     text = format_transaction(
         date=datetime.date(2026, 6, 1),
-        payee="Rent",
-        narration="",
+        payee="",  # empty payee => lone narration string
+        narration="Rent",
         postings=[
             Posting(id="a", account="Expenses:Housing:Rent", amount="1200", currency="USD"),
             Posting(id="b", account="Assets:Bank:Checking"),
         ],
     )
     assert text == (
-        '2026-06-01 * "Rent" ""\n'
+        '2026-06-01 * "Rent"\n'
         "  Expenses:Housing:Rent  1200 USD\n"
         "  Assets:Bank:Checking\n"
     )

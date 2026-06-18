@@ -120,6 +120,8 @@
   "scheduleForm": {
     "name": "Name",
     "namePlaceholder": "e.g. Netflix",
+    "payee": "Payee",
+    "payeePlaceholder": "Optional bean payee",
     "postings": "Postings",
     "addPosting": "Add posting",
     "postingN": "Posting {{n}}",

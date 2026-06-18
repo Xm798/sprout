@@ -11,6 +11,7 @@ export function makeSchedule(overrides: Partial<Schedule> = {}): Schedule {
   return {
     id: 7,
     name: "Spotify",
+    payee: "Spotify AB",
     narration: "sub",
     interval_unit: "month",
     interval_count: 1,

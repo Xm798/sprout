@@ -76,6 +76,7 @@ function postingToDraft(p: Posting, freshId = false): DraftPosting {
 function emptyDraft(currency: string): Draft {
   return {
     name: "",
+    payee: "",
     narration: "",
     interval_unit: "month",
     interval_count: 1,
@@ -94,6 +95,7 @@ function emptyDraft(currency: string): Draft {
 function scheduleToDraft(s: Schedule): Draft {
   return {
     name: s.name,
+    payee: s.payee,
     narration: s.narration,
     interval_unit: s.interval_unit,
     interval_count: s.interval_count,
@@ -178,7 +180,8 @@ export function ScheduleForm({
     touched.current = true;
     setDraft((d) => ({
       ...d,
-      name: p.name,
+      // name is the schedule's own label, kept as the user entered it — not imported.
+      payee: p.payee,
       narration: p.narration,
       tags: p.tags,
       anchor_date: p.anchor_date,
@@ -405,6 +408,16 @@ export function ScheduleForm({
             </div>
           );
         })}
+      </div>
+
+      <div className="space-y-1.5">
+        <Label htmlFor="sf-payee">{t("scheduleForm.payee")}</Label>
+        <Input
+          id="sf-payee"
+          placeholder={t("scheduleForm.payeePlaceholder")}
+          value={draft.payee}
+          onChange={(e) => set("payee", e.target.value)}
+        />
       </div>
 
       <div className="space-y-1.5">

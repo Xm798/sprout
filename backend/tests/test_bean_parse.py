@@ -18,7 +18,7 @@ def test_single_two_leg():
         "  Expenses:Subscription  15.00 USD\n"
         "  Assets:CreditCard\n"
     )
-    assert parsed.name == "Spotify"
+    assert parsed.payee == "Spotify"
     assert parsed.narration == "subscription"
     assert parsed.anchor_date == datetime.date(2026, 6, 15)
     assert _legs(parsed) == [
@@ -95,9 +95,9 @@ def test_no_tags_is_empty_string():
     assert parsed.tags == ""
 
 
-def test_none_payee_and_narration_become_empty_string():
+def test_single_string_is_narration_with_empty_payee():
     parsed = parse_transaction('2026-06-01 * "only narration"\n  Assets:B  1 USD\n  Equity:D\n')
-    assert parsed.name == ""
+    assert parsed.payee == ""
     assert parsed.narration == "only narration"
 
 
@@ -113,7 +113,8 @@ def test_unrepresentable_elements_silently_dropped():
     assert parsed.postings[0].cost == Cost(amount="100.00", currency="USD", total=False)
     assert parsed.tags == "t"
     # no exception, no leaked metadata/links anywhere in the structure
-    assert parsed.name == "Broker"
+    assert parsed.payee == "Broker"
+    assert parsed.narration == "buy"
 
 
 def test_structural_warning_single_posting():
@@ -148,9 +149,10 @@ def test_syntax_error_raises():
 def test_non_transaction_directives_ignored():
     parsed = parse_transaction(
         "2026-06-01 price ACME 100 USD\n"
-        '2026-06-01 * "x" ""\n  Assets:B  1 USD\n  Equity:D\n'
+        '2026-06-01 * "x"\n  Assets:B  1 USD\n  Equity:D\n'
     )
-    assert parsed.name == "x"
+    assert parsed.payee == ""
+    assert parsed.narration == "x"
 
 
 @pytest.mark.parametrize("postings", [
@@ -173,7 +175,7 @@ def test_structural_roundtrip(postings):
         postings=postings, tags=["sprout"],
     )
     parsed = parse_transaction(text)
-    assert parsed.name == "P"
+    assert parsed.payee == "P"
     assert parsed.narration == "n"
     assert parsed.tags == "sprout"
     assert _legs(parsed) == [p.model_dump(exclude={"id"}) for p in postings]
