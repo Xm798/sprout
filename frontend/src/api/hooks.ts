@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "./client";
-import type { AppConfig, ConfirmBody, PreviewBody, ScheduleCreate } from "./types";
+import type { AppConfig, ConfirmBody, ParseBeanRequest, PreviewBody, ScheduleCreate } from "./types";
 
 export const qk = {
   schedules: ["schedules"] as const,
@@ -41,6 +41,13 @@ export function useUpdateSchedule() {
       // Editing the rule can delete (or later add) pending occurrences.
       qc.invalidateQueries({ queryKey: qk.inbox });
     },
+  });
+}
+
+// Pure transform (no server-state change) so there is nothing to invalidate.
+export function useParseTransaction() {
+  return useMutation({
+    mutationFn: (body: ParseBeanRequest) => api.parseTransaction(body),
   });
 }
 

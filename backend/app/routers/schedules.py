@@ -1,8 +1,10 @@
 import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlmodel import Session, select
 
+from app.bean_parse import ParseError, ParsedTransaction, parse_transaction
 from app.config import AppConfig
 from app.db import get_session, get_config
 from app.models import Schedule, ScheduleBase, ScheduleCreate, ScheduleRead
@@ -11,6 +13,10 @@ from app.writer import validate_target_file
 from app import services
 
 router = APIRouter(prefix="/schedules")
+
+
+class ParseRequest(BaseModel):
+    text: str
 
 
 def _read(sch: Schedule) -> ScheduleRead:
@@ -47,6 +53,15 @@ def create(payload: ScheduleCreate, session: Session = Depends(get_session)) -> 
 @router.get("", response_model=list[ScheduleRead])
 def list_all(session: Session = Depends(get_session)) -> list[ScheduleRead]:
     return [_read(s) for s in session.exec(select(Schedule)).all()]
+
+
+# Registered before the /{schedule_id} routes so the literal "parse" always wins.
+@router.post("/parse", response_model=ParsedTransaction)
+def parse(payload: ParseRequest) -> ParsedTransaction:
+    try:
+        return parse_transaction(payload.text)
+    except ParseError as exc:
+        raise HTTPException(400, str(exc))
 
 
 @router.get("/{schedule_id}", response_model=ScheduleRead)

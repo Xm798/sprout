@@ -35,6 +35,21 @@ export interface ScheduleCreate {
   target_file?: string | null; // relative .bean path; null = global write strategy
 }
 
+export interface ParseBeanRequest {
+  text: string;
+}
+
+// Transaction-level fields parsed from pasted bean text; recurrence fields are
+// filled in by the user. anchor_date is the wire format (ISO date string).
+export interface ParsedTransaction {
+  name: string;
+  narration: string;
+  postings: Posting[];
+  tags: string;
+  anchor_date: string;
+  warnings: string[];
+}
+
 export interface Schedule extends ScheduleCreate {
   id: number;
   headline_amount?: string | null; // first amount-bearing leg; display fallback when analyzeFlow can't compute
