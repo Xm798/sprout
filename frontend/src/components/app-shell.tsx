@@ -26,7 +26,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         `bottom-0` to the header's bottom edge (i.e. the top of the screen)
         instead of the viewport.
       */}
-      <header className="sticky top-0 z-40 border-b border-border/60">
+      <header className="sticky top-0 z-40 border-b border-border/60 pt-safe">
         <div
           aria-hidden
           className="absolute inset-0 -z-10 bg-background/80 backdrop-blur-xl"

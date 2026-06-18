@@ -121,4 +121,8 @@
   .h-safe-bottom {
     height: env(safe-area-inset-bottom);
   }
+  /* Keep the sticky header clear of the status bar / Dynamic Island. */
+  .pt-safe {
+    padding-top: env(safe-area-inset-top);
+  }
 }
