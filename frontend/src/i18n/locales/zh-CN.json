@@ -147,7 +147,18 @@
     "createFailedToast": "无法创建计划",
     "create": "创建计划",
     "saveChanges": "保存更改",
-    "updateFailedToast": "无法更新计划"
+    "updateFailedToast": "无法更新计划",
+    "import": {
+      "title": "从 bean 文本导入",
+      "textareaLabel": "bean 文本",
+      "placeholder": "粘贴一条 Beancount 交易…",
+      "parseButton": "解析填充",
+      "parseFailed": "无法解析：{{detail}}",
+      "noTransaction": "文本中未找到交易。",
+      "multipleTransactions": "只能粘贴一条交易。",
+      "warningsTitle": "已导入，但请检查：",
+      "overwriteConfirm": "这将覆盖你已填写的内容，确定继续？"
+    }
   },
   "settings": {
     "title": "设置",

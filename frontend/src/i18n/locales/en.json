@@ -149,7 +149,18 @@
     "createFailedToast": "Couldn't create schedule",
     "create": "Create schedule",
     "saveChanges": "Save changes",
-    "updateFailedToast": "Couldn't update schedule"
+    "updateFailedToast": "Couldn't update schedule",
+    "import": {
+      "title": "Import from bean text",
+      "textareaLabel": "Bean text",
+      "placeholder": "Paste a Beancount transaction…",
+      "parseButton": "Parse & fill",
+      "parseFailed": "Couldn't parse: {{detail}}",
+      "noTransaction": "No transaction found in the text.",
+      "multipleTransactions": "Paste exactly one transaction.",
+      "warningsTitle": "Imported, but check:",
+      "overwriteConfirm": "This will replace what you've already entered. Continue?"
+    }
   },
   "settings": {
     "title": "Settings",

@@ -15,8 +15,21 @@ vi.mock("../api/client", () => ({
     getConfig: vi.fn().mockResolvedValue({ id: 1, default_currency: "USD" }),
     createSchedule: vi.fn().mockResolvedValue({ id: 1 }),
     updateSchedule: vi.fn().mockResolvedValue({ id: 7 }),
+    parseTransaction: vi.fn(),
   },
 }));
+
+const PARSED = {
+  name: "Spotify",
+  narration: "sub",
+  tags: "music,sprout",
+  anchor_date: "2026-06-15",
+  postings: [
+    { id: "x", account: "Expenses:Subscription", amount: "15.00", currency: "USD", cost: null, price: null },
+    { id: "y", account: "Assets:CreditCard", amount: null, currency: null, cost: null, price: null },
+  ],
+  warnings: [] as string[],
+};
 
 afterEach(() => vi.clearAllMocks());
 
@@ -185,4 +198,81 @@ test("edit mode round-trips cost/price annotations the form can't edit", async (
   const [, body] = (api.updateSchedule as ReturnType<typeof vi.fn>).mock.calls[0];
   expect(body.postings[0].cost).toEqual(cost);
   expect(body.postings[0].price).toEqual(price);
+});
+
+
+// ── Import from bean text ────────────────────────────────────────────────────
+
+async function openImportAndParse(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByRole("button", { name: /import from bean text/i }));
+  await user.type(screen.getByLabelText(/bean text/i), "x");
+  await user.click(screen.getByRole("button", { name: /parse & fill/i }));
+}
+
+test("import fills the form from parsed bean text on a clean form, no confirm", async () => {
+  const user = userEvent.setup();
+  vi.mocked(api.parseTransaction).mockResolvedValue({ ...PARSED });
+  const confirmSpy = vi.spyOn(window, "confirm");
+  renderWithProviders(<ScheduleForm />);
+
+  await openImportAndParse(user);
+
+  await waitFor(() => expect(screen.getByLabelText(/^name$/i)).toHaveValue("Spotify"));
+  expect(screen.getByLabelText(/amount 1/i)).toHaveValue("15.00");
+  expect(screen.getByLabelText(/account 2/i)).toHaveValue("Assets:CreditCard");
+  // recurrence fields are left untouched at their defaults
+  expect(screen.getByLabelText(/repeat count/i)).toHaveValue(1);
+  expect(confirmSpy).not.toHaveBeenCalled();
+  confirmSpy.mockRestore();
+});
+
+test("import confirms before overwriting a dirty form and respects cancel", async () => {
+  const user = userEvent.setup();
+  vi.mocked(api.parseTransaction).mockResolvedValue({ ...PARSED });
+  const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+  renderWithProviders(<ScheduleForm />);
+
+  await user.type(screen.getByLabelText(/^name$/i), "Manual");
+  await openImportAndParse(user);
+
+  await waitFor(() => expect(confirmSpy).toHaveBeenCalledTimes(1));
+  // cancelled -> nothing overwritten
+  expect(screen.getByLabelText(/^name$/i)).toHaveValue("Manual");
+  confirmSpy.mockRestore();
+});
+
+test("import surfaces structural warnings returned by the backend", async () => {
+  const user = userEvent.setup();
+  vi.mocked(api.parseTransaction).mockResolvedValue({
+    ...PARSED,
+    warnings: ["a transaction needs at least 2 postings"],
+  });
+  renderWithProviders(<ScheduleForm />);
+
+  await openImportAndParse(user);
+
+  expect(
+    await screen.findByText(/a transaction needs at least 2 postings/i)
+  ).toBeInTheDocument();
+});
+
+test("import shows a friendly message when parsing fails", async () => {
+  const user = userEvent.setup();
+  vi.mocked(api.parseTransaction).mockRejectedValue(new Error("no transaction found"));
+  renderWithProviders(<ScheduleForm />);
+
+  await openImportAndParse(user);
+
+  expect(
+    await screen.findByText(/no transaction found in the text/i)
+  ).toBeInTheDocument();
+  // form is left untouched on error
+  expect(screen.getByLabelText(/^name$/i)).toHaveValue("");
+});
+
+test("import section is hidden in edit mode", () => {
+  renderWithProviders(<ScheduleForm schedule={makeSchedule()} />);
+  expect(
+    screen.queryByRole("button", { name: /import from bean text/i })
+  ).not.toBeInTheDocument();
 });

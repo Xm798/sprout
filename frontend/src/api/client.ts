@@ -3,6 +3,8 @@ import type {
   ConfirmBody,
   HistoryCheck,
   Occurrence,
+  ParseBeanRequest,
+  ParsedTransaction,
   PreviewBody,
   Schedule,
   ScheduleCreate,
@@ -51,6 +53,11 @@ export const api = {
     http<Schedule>(`/schedules/${id}`, { method: "PUT", body: JSON.stringify(body) }),
   deleteSchedule: (id: number) =>
     http<{ ok: boolean }>(`/schedules/${id}`, { method: "DELETE" }),
+  parseTransaction: (body: ParseBeanRequest) =>
+    http<ParsedTransaction>("/schedules/parse", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
 
   getInbox: () => http<Occurrence[]>("/inbox"),
   // POST preview renders with transient (unsaved) overrides so the inbox can

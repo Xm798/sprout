@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
-import { Plus, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronRight, Plus, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 
@@ -10,11 +10,13 @@ import {
   useConfig,
   useCreateSchedule,
   useCurrencies,
+  useParseTransaction,
   useUpdateSchedule,
 } from "@/api/hooks";
 import type {
   Cost,
   IntervalUnit,
+  ParsedTransaction,
   Posting,
   Price,
   Schedule,
@@ -56,6 +58,20 @@ function newLeg(currency = ""): DraftPosting {
   return { id: crypto.randomUUID(), account: "", amount: "", currency };
 }
 
+// Stored/parsed Posting -> editable DraftPosting. `freshId` mints a new id for
+// parsed legs (a brand-new template); editing preserves the id so the backend
+// keeps per-leg overrides on untouched legs.
+function postingToDraft(p: Posting, freshId = false): DraftPosting {
+  return {
+    id: freshId ? crypto.randomUUID() : p.id,
+    account: p.account,
+    amount: p.amount ?? "",
+    currency: p.currency ?? "",
+    cost: p.cost,
+    price: p.price,
+  };
+}
+
 // Default: an amount leg + an auto-balance leg — the old "from X to Y" model.
 function emptyDraft(currency: string): Draft {
   return {
@@ -87,14 +103,7 @@ function scheduleToDraft(s: Schedule): Draft {
     tags: s.tags,
     status: s.status,
     target_file: s.target_file ?? "",
-    postings: s.postings.map((p) => ({
-      id: p.id,
-      account: p.account,
-      amount: p.amount ?? "",
-      currency: p.currency ?? "",
-      cost: p.cost,
-      price: p.price,
-    })),
+    postings: s.postings.map((p) => postingToDraft(p)),
   };
 }
 
@@ -146,7 +155,57 @@ export function ScheduleForm({
   const beanFiles = useBeanFiles();
   const create = useCreateSchedule();
   const update = useUpdateSchedule();
+  const parse = useParseTransaction();
   const saving = create.isPending || update.isPending;
+
+  // Paste-and-parse: a create-only shortcut that fills the transaction fields
+  // from an existing bean transaction, leaving recurrence fields to the user.
+  const [importOpen, setImportOpen] = useState(false);
+  const [importText, setImportText] = useState("");
+  const [importError, setImportError] = useState<string | null>(null);
+  const [importWarnings, setImportWarnings] = useState<string[]>([]);
+
+  // Known backend sentinels get a localized message; anything else (raw
+  // beancount syntax error) is wrapped so the CN UI never shows a bare blob.
+  function importErrorText(detail: string): string {
+    if (detail === "no transaction found") return t("scheduleForm.import.noTransaction");
+    if (detail === "paste exactly one transaction")
+      return t("scheduleForm.import.multipleTransactions");
+    return t("scheduleForm.import.parseFailed", { detail });
+  }
+
+  function applyParsed(p: ParsedTransaction) {
+    touched.current = true;
+    setDraft((d) => ({
+      ...d,
+      name: p.name,
+      narration: p.narration,
+      tags: p.tags,
+      anchor_date: p.anchor_date,
+      postings: p.postings.map((pg) => postingToDraft(pg, true)),
+    }));
+  }
+
+  function runParse() {
+    setImportError(null);
+    parse.mutate(
+      { text: importText },
+      {
+        onSuccess: (p) => {
+          // Guard against clobbering in-progress input; a pristine form applies
+          // freely (that is the whole point), a dirty one asks first.
+          if (touched.current && !window.confirm(t("scheduleForm.import.overwriteConfirm")))
+            return;
+          applyParsed(p);
+          setImportWarnings(p.warnings);
+        },
+        onError: (err) => {
+          setImportWarnings([]);
+          setImportError(importErrorText(errorMessage(err)));
+        },
+      }
+    );
+  }
 
   const accountOptions = accounts.data ?? [];
   const currencyOptions = currencies.data ?? [];
@@ -213,6 +272,59 @@ export function ScheduleForm({
 
   return (
     <form onSubmit={submit} className="space-y-4">
+      {!schedule && (
+        <div className="rounded-lg border border-border/60">
+          <button
+            type="button"
+            className="flex w-full items-center gap-1.5 px-3 py-2 text-sm font-medium text-muted-foreground hover:text-foreground"
+            aria-expanded={importOpen}
+            onClick={() => setImportOpen((o) => !o)}
+          >
+            {importOpen ? (
+              <ChevronDown className="h-4 w-4" />
+            ) : (
+              <ChevronRight className="h-4 w-4" />
+            )}
+            {t("scheduleForm.import.title")}
+          </button>
+          {importOpen && (
+            <div className="space-y-2 px-3 pb-3">
+              <textarea
+                aria-label={t("scheduleForm.import.textareaLabel")}
+                className="flex min-h-[7rem] w-full rounded-md border border-input bg-background/60 px-3 py-2 font-mono text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
+                placeholder={t("scheduleForm.import.placeholder")}
+                value={importText}
+                onChange={(e) => setImportText(e.target.value)}
+              />
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                disabled={parse.isPending || importText.trim() === ""}
+                onClick={runParse}
+              >
+                {t("scheduleForm.import.parseButton")}
+              </Button>
+              {importError && (
+                <p role="alert" className="text-sm text-destructive">
+                  {importError}
+                </p>
+              )}
+              {importWarnings.length > 0 && (
+                <div className="text-sm text-amber-600 dark:text-amber-500">
+                  <p className="font-medium">{t("scheduleForm.import.warningsTitle")}</p>
+                  <ul className="list-disc pl-5">
+                    {importWarnings.map((w) => (
+                      <li key={w}>{w}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="space-y-1.5">
         <Label htmlFor="sf-name">{t("scheduleForm.name")}</Label>
         <Input

@@ -380,3 +380,51 @@ def test_bean_files_lists_nested_relative_paths(client, tmp_path):
     assert "loans/car.bean" in files
     assert "notes.txt" not in files
     assert files == sorted(files)
+
+
+# ── POST /api/schedules/parse ────────────────────────────────────────────────
+
+def test_parse_returns_transaction_fields(client):
+    r = client.post("/api/schedules/parse", json={"text":
+        '2026-06-15 * "Spotify" "sub"\n'
+        "  Expenses:Subscription  15.00 USD\n"
+        "  Assets:CreditCard\n"
+    })
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["name"] == "Spotify"
+    assert body["narration"] == "sub"
+    assert body["anchor_date"] == "2026-06-15"
+    assert body["tags"] == ""
+    assert body["warnings"] == []
+    assert [p["account"] for p in body["postings"]] == \
+        ["Expenses:Subscription", "Assets:CreditCard"]
+    assert body["postings"][1]["amount"] is None
+    assert all(p["id"] for p in body["postings"])
+
+
+def test_parse_route_not_shadowed_by_schedule_id(client):
+    # "parse" must match the literal route, not /{schedule_id} (which 422s on int).
+    r = client.post("/api/schedules/parse", json={"text":
+        '2026-06-15 * "x" ""\n  Assets:B  1 USD\n  Equity:D\n'})
+    assert r.status_code == 200, r.text
+
+
+def test_parse_surfaces_structural_warning(client):
+    r = client.post("/api/schedules/parse", json={"text":
+        '2026-06-15 * "x" ""\n  Assets:B  1 USD\n'})
+    assert r.status_code == 200, r.text
+    assert r.json()["warnings"]
+
+
+@pytest.mark.parametrize("text", [
+    "",
+    "2026-06-01 open Assets:Bank\n",
+    '2026-06-01 * "a" ""\n  Assets:B 1 USD\n  Equity:D\n'
+    '2026-06-02 * "b" ""\n  Assets:B 2 USD\n  Equity:D\n',
+    "garbage @@@ 2026-13-99",
+])
+def test_parse_rejects_bad_input(client, text):
+    r = client.post("/api/schedules/parse", json={"text": text})
+    assert r.status_code == 400, r.text
+    assert r.json()["detail"]
