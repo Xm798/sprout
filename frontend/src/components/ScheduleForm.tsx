@@ -22,6 +22,7 @@ import type {
   Schedule,
   ScheduleCreate,
 } from "@/api/types";
+import { api } from "@/api/client";
 import { Button } from "@/components/ui/button";
 import { Combobox } from "@/components/ui/combobox";
 import { DatePicker } from "@/components/ui/date-picker";
@@ -109,6 +110,16 @@ function scheduleToDraft(s: Schedule): Draft {
   };
 }
 
+// A half-filled price row (revealed but not completed) is dropped rather than
+// submitted, since the backend rejects a price with a non-numeric amount.
+function cleanPrice(price?: Price | null): Price | null {
+  if (!price) return null;
+  const amount = price.amount.trim();
+  const currency = price.currency.trim().toUpperCase();
+  if (amount === "" || currency === "") return null;
+  return { amount, currency, total: price.total };
+}
+
 function toPayload(draft: Draft): ScheduleCreate {
   const postings: Posting[] = draft.postings.map((p) => {
     const amount = p.amount.trim();
@@ -123,7 +134,7 @@ function toPayload(draft: Draft): ScheduleCreate {
           amount,
           currency: p.currency,
           cost: p.cost ?? null,
-          price: p.price ?? null,
+          price: cleanPrice(p.price),
         };
   });
   return { ...draft, target_file: draft.target_file.trim() || null, postings };
@@ -166,6 +177,13 @@ export function ScheduleForm({
   const [importText, setImportText] = useState("");
   const [importError, setImportError] = useState<string | null>(null);
   const [importWarnings, setImportWarnings] = useState<string[]>([]);
+  // Per-leg price row: which legs the user has revealed, which is mid-fetch,
+  // and the provider/date of the last fetched rate (keyed by posting id).
+  const [priceOpen, setPriceOpen] = useState<Record<string, boolean>>({});
+  const [fetchingId, setFetchingId] = useState<string | null>(null);
+  const [rateMeta, setRateMeta] = useState<
+    Record<string, { source: string; asOf: string }>
+  >({});
 
   // Known backend sentinels get a localized message; anything else (raw
   // beancount syntax error) is wrapped so the CN UI never shows a bare blob.
@@ -230,6 +248,40 @@ export function ScheduleForm({
       ...d,
       postings: d.postings.map((p) => (p.id === id ? { ...p, ...patch } : p)),
     }));
+  }
+
+  function setPriceField(leg: DraftPosting, patch: Partial<Price>) {
+    const base: Price = leg.price ?? { amount: "", currency: "", total: false };
+    setLeg(leg.id, { price: { ...base, ...patch } });
+  }
+
+  function clearPrice(leg: DraftPosting) {
+    setLeg(leg.id, { price: null });
+    setPriceOpen((o) => ({ ...o, [leg.id]: false }));
+    setRateMeta((m) => {
+      const { [leg.id]: _drop, ...rest } = m;
+      return rest;
+    });
+  }
+
+  // base = the leg's own commodity, quote = the price currency: `amount X @ rate Y`
+  // means rate is Y per X. Fiat pairs route to ECB, crypto pairs to CoinGecko.
+  async function fetchRate(leg: DraftPosting) {
+    const base = leg.currency.trim().toUpperCase();
+    const quote = (leg.price?.currency ?? "").trim().toUpperCase();
+    if (!base || !quote) return;
+    setFetchingId(leg.id);
+    try {
+      const q = await api.getExchangeRate(base, quote);
+      setPriceField(leg, { amount: q.rate, currency: quote });
+      setRateMeta((m) => ({ ...m, [leg.id]: { source: q.source, asOf: q.as_of } }));
+    } catch (err) {
+      toast.error(t("scheduleForm.price.fetchFailedToast"), {
+        description: errorMessage(err),
+      });
+    } finally {
+      setFetchingId(null);
+    }
   }
 
   function addLeg() {
@@ -405,6 +457,71 @@ export function ScheduleForm({
                   placeholder={defaultCurrency}
                 />
               </div>
+
+              {!blank &&
+                (leg.price || priceOpen[leg.id] ? (
+                  <div className="space-y-1.5 rounded-md bg-muted/40 p-2">
+                    <div className="grid grid-cols-[auto_1fr_1fr] items-center gap-2">
+                      <span className="font-mono text-sm text-muted-foreground">@</span>
+                      <Input
+                        aria-label={t("scheduleForm.priceN", { n: i + 1 })}
+                        inputMode="decimal"
+                        placeholder={t("scheduleForm.price.amountPlaceholder")}
+                        value={leg.price?.amount ?? ""}
+                        onChange={(e) => setPriceField(leg, { amount: e.target.value })}
+                      />
+                      <Combobox
+                        aria-label={t("scheduleForm.priceCurrencyN", { n: i + 1 })}
+                        value={leg.price?.currency ?? ""}
+                        onChange={(v) => setPriceField(leg, { currency: v })}
+                        suggestions={currencyOptions}
+                        transform={(v) => v.toUpperCase()}
+                        placeholder={t("scheduleForm.price.currencyPlaceholder")}
+                      />
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        disabled={
+                          fetchingId === leg.id ||
+                          !leg.currency.trim() ||
+                          !(leg.price?.currency ?? "").trim()
+                        }
+                        onClick={() => fetchRate(leg)}
+                      >
+                        {fetchingId === leg.id
+                          ? t("scheduleForm.price.fetching")
+                          : t("scheduleForm.price.fetch")}
+                      </Button>
+                      {rateMeta[leg.id] && (
+                        <span className="text-xs text-muted-foreground">
+                          {rateMeta[leg.id].source} · {rateMeta[leg.id].asOf}
+                        </span>
+                      )}
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="ml-auto text-muted-foreground"
+                        onClick={() => clearPrice(leg)}
+                      >
+                        {t("scheduleForm.price.remove")}
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    className="text-xs text-muted-foreground hover:text-foreground"
+                    onClick={() =>
+                      setPriceOpen((o) => ({ ...o, [leg.id]: true }))
+                    }
+                  >
+                    + {t("scheduleForm.price.add")}
+                  </button>
+                ))}
             </div>
           );
         })}

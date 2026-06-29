@@ -12,6 +12,15 @@ export interface Price {
   total: boolean; // true -> @@ total price; false -> @ per-unit
 }
 
+export interface RateQuote {
+  base: string;
+  quote: string;
+  rate: string; // decimal serialized as string
+  source: string; // "frankfurter" | "coingecko"
+  as_of: string; // YYYY-MM-DD the rate is effective for
+  cached: boolean;
+}
+
 export interface Posting {
   id: string; // client-generated UUID, unique within a schedule
   account: string;

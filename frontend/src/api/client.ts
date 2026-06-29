@@ -6,6 +6,7 @@ import type {
   ParseBeanRequest,
   ParsedTransaction,
   PreviewBody,
+  RateQuote,
   Schedule,
   ScheduleCreate,
   WrittenTransaction,
@@ -89,6 +90,12 @@ export const api = {
 
   accounts: () => http<string[]>("/accounts"),
   currencies: () => http<string[]>("/currencies"),
+  // Fetch a live exchange rate for base->quote (fiat via ECB, crypto via CoinGecko).
+  getExchangeRate: (base: string, quote: string, on?: string) => {
+    const params = new URLSearchParams({ base, quote });
+    if (on) params.set("on", on);
+    return http<RateQuote>(`/exchange-rates/rate?${params}`);
+  },
   beanFiles: () => http<string[]>("/bean-files"),
   getConfig: () => http<AppConfig>("/config"),
   updateConfig: (body: AppConfig) =>

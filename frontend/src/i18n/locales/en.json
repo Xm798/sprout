@@ -136,6 +136,17 @@
     "amountN": "Amount {{n}}",
     "amountPlaceholder": "Amount (blank = auto-balance)",
     "currencyN": "Currency {{n}}",
+    "priceN": "Price {{n}}",
+    "priceCurrencyN": "Price currency {{n}}",
+    "price": {
+      "add": "Exchange rate",
+      "amountPlaceholder": "Rate",
+      "currencyPlaceholder": "Currency",
+      "fetch": "Fetch rate",
+      "fetching": "Fetching…",
+      "remove": "Remove",
+      "fetchFailedToast": "Couldn't fetch the exchange rate"
+    },
     "narration": "Narration",
     "narrationPlaceholder": "Optional memo",
     "repeatsEvery": "Repeats every",

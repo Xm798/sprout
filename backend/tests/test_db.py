@@ -68,13 +68,27 @@ def test_alembic_upgrade_builds_schema_on_fresh_sqlite(tmp_path, monkeypatch):
 def test_init_db_adopts_pre_alembic_database(tmp_path, monkeypatch):
     """A database created by the old SQLModel.create_all path (tables present,
     no alembic_version) must be adopted via stamp — not crash trying to
-    CREATE TABLE over existing tables."""
+    CREATE TABLE over existing tables.
+
+    A real pre-Alembic database carries exactly the *baseline* schema (it was
+    created before any later migration existed), so simulate it by upgrading to
+    the base revision and dropping alembic_version — not via create_all on the
+    current metadata, which would also contain post-baseline tables and so
+    misrepresent what a legacy database actually looks like."""
+    from alembic import command
+    from alembic.script import ScriptDirectory
+
     db_file = tmp_path / "legacy.db"
+    monkeypatch.setenv("SPROUT_DATABASE_URL", f"sqlite:///{db_file}")
+    cfg = _alembic_config()
+    base = ScriptDirectory.from_config(cfg).get_base()
+    command.upgrade(cfg, base)  # baseline schema only
+
     legacy_engine = make_engine(f"sqlite:///{db_file}")
-    SQLModel.metadata.create_all(legacy_engine)  # legacy schema, no alembic_version
+    with legacy_engine.begin() as c:
+        c.execute(text("DROP TABLE alembic_version"))  # back to a pre-Alembic state
     assert "alembic_version" not in inspect(legacy_engine).get_table_names()
 
-    monkeypatch.setenv("SPROUT_DATABASE_URL", f"sqlite:///{db_file}")
     monkeypatch.setattr(db_module, "engine", legacy_engine)
 
     db_module.init_db()  # must not raise

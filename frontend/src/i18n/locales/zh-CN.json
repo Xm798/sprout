@@ -134,6 +134,17 @@
     "amountN": "金额 {{n}}",
     "amountPlaceholder": "金额（留空 = 自动平衡）",
     "currencyN": "货币 {{n}}",
+    "priceN": "价格 {{n}}",
+    "priceCurrencyN": "价格货币 {{n}}",
+    "price": {
+      "add": "汇率",
+      "amountPlaceholder": "汇率",
+      "currencyPlaceholder": "货币",
+      "fetch": "拉取汇率",
+      "fetching": "拉取中…",
+      "remove": "移除",
+      "fetchFailedToast": "拉取汇率失败"
+    },
     "narration": "摘要",
     "narrationPlaceholder": "可选备注",
     "repeatsEvery": "重复周期",

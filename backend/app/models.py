@@ -47,6 +47,21 @@ class ScheduleRead(ScheduleBase):
     updated_at: datetime.datetime
 
 
+class RateCacheEntry(SQLModel, table=True):
+    """One cached exchange rate for a (base, quote, date, source) tuple.
+
+    ``rate`` is a Decimal serialized as a string to match posting amounts.
+    ``fetched_at`` drives TTL: fiat (Frankfurter) is re-fetched daily, crypto
+    (CoinGecko) every few minutes — see app.exchange_rates."""
+
+    base: str = Field(primary_key=True)
+    quote: str = Field(primary_key=True)
+    rate_date: datetime.date = Field(primary_key=True)
+    source: str = Field(primary_key=True)
+    rate: str
+    fetched_at: datetime.datetime
+
+
 class Occurrence(SQLModel, table=True):
     __table_args__ = (UniqueConstraint("schedule_id", "due_date"),)
 

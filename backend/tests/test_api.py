@@ -429,3 +429,34 @@ def test_parse_rejects_bad_input(client, text):
     r = client.post("/api/schedules/parse", json={"text": text})
     assert r.status_code == 400, r.text
     assert r.json()["detail"]
+
+
+def test_exchange_rate_endpoint_returns_rate(client, monkeypatch):
+    import datetime
+    from decimal import Decimal
+    from app import exchange_rates as ex
+
+    def fake_fetch(source, base, quote, on):
+        assert source == "frankfurter"
+        return Decimal("0.8673"), datetime.date(2026, 6, 25)
+
+    monkeypatch.setattr(ex, "_network_fetch", fake_fetch)
+    r = client.get("/api/exchange-rates/rate",
+                   params={"base": "HKD", "quote": "CNY"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["rate"] == "0.8673"
+    assert body["source"] == "frankfurter"
+    assert body["base"] == "HKD" and body["quote"] == "CNY"
+
+
+def test_exchange_rate_endpoint_maps_upstream_failure_to_502(client, monkeypatch):
+    from app import exchange_rates as ex
+
+    def boom(source, base, quote, on):
+        raise ex.RateError("upstream down")
+
+    monkeypatch.setattr(ex, "_network_fetch", boom)
+    r = client.get("/api/exchange-rates/rate",
+                   params={"base": "HKD", "quote": "CNY"})
+    assert r.status_code == 502, r.text

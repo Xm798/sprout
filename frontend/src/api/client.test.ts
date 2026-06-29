@@ -50,6 +50,27 @@ describe("api client", () => {
     });
   });
 
+  it("GETs the exchange rate with base/quote query params", async () => {
+    const f = mockFetch({
+      base: "HKD", quote: "CNY", rate: "0.8673",
+      source: "frankfurter", as_of: "2026-06-25", cached: false,
+    });
+    const res = await api.getExchangeRate("HKD", "CNY");
+    expect(res.rate).toBe("0.8673");
+    expect(f.mock.calls[0][0]).toBe("/api/exchange-rates/rate?base=HKD&quote=CNY");
+  });
+
+  it("includes the on=date query param when given", async () => {
+    const f = mockFetch({
+      base: "HKD", quote: "CNY", rate: "0.8673",
+      source: "frankfurter", as_of: "2026-06-25", cached: true,
+    });
+    await api.getExchangeRate("HKD", "CNY", "2026-06-25");
+    expect(f.mock.calls[0][0]).toBe(
+      "/api/exchange-rates/rate?base=HKD&quote=CNY&on=2026-06-25"
+    );
+  });
+
   it("surfaces the FastAPI detail string on an error response", async () => {
     mockFetch({ detail: "amount 'abc' is not a number" }, false, 422);
     await expect(api.confirm(1, {})).rejects.toThrow(

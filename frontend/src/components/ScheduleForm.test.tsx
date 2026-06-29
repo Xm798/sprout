@@ -16,6 +16,7 @@ vi.mock("../api/client", () => ({
     createSchedule: vi.fn().mockResolvedValue({ id: 1 }),
     updateSchedule: vi.fn().mockResolvedValue({ id: 7 }),
     parseTransaction: vi.fn(),
+    getExchangeRate: vi.fn(),
   },
 }));
 
@@ -200,6 +201,65 @@ test("edit mode round-trips cost/price annotations the form can't edit", async (
   expect(body.postings[0].price).toEqual(price);
 });
 
+
+// ── Per-posting exchange rate ────────────────────────────────────────────────
+
+test("fetches an exchange rate into a posting's price on demand", async () => {
+  const user = userEvent.setup();
+  vi.mocked(api.getExchangeRate).mockResolvedValue({
+    base: "USD", quote: "CNY", rate: "7.1234",
+    source: "frankfurter", as_of: "2026-06-25", cached: false,
+  });
+  renderWithProviders(<ScheduleForm />);
+
+  await user.type(screen.getByLabelText(/amount 1/i), "100");
+  // Price controls are hidden until the user reveals them per leg.
+  expect(screen.queryByLabelText(/price 1/i)).not.toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: /exchange rate/i }));
+
+  await user.type(screen.getByLabelText(/price currency 1/i), "CNY");
+  await user.click(screen.getByRole("button", { name: /fetch rate/i }));
+
+  await waitFor(() =>
+    expect(screen.getByLabelText(/price 1/i)).toHaveValue("7.1234")
+  );
+  expect(api.getExchangeRate).toHaveBeenCalledWith("USD", "CNY");
+  // The provider + effective date are surfaced so the user trusts the number.
+  expect(screen.getByText(/frankfurter/i)).toBeInTheDocument();
+  expect(screen.getByText(/2026-06-25/)).toBeInTheDocument();
+});
+
+test("submits the fetched price on the posting and drops an empty one", async () => {
+  const user = userEvent.setup();
+  vi.mocked(api.getExchangeRate).mockResolvedValue({
+    base: "USD", quote: "CNY", rate: "7.1234",
+    source: "frankfurter", as_of: "2026-06-25", cached: false,
+  });
+  renderWithProviders(<ScheduleForm />);
+
+  await user.type(screen.getByLabelText(/^name$/i), "FX");
+  await user.type(screen.getByLabelText(/account 1/i), "Expenses:Subscription");
+  await user.type(screen.getByLabelText(/amount 1/i), "100");
+  await user.type(screen.getByLabelText(/account 2/i), "Assets:CreditCard");
+  await user.click(screen.getByLabelText(/starting from/i));
+  await user.click(await screen.findByRole("button", { name: /today/i }));
+
+  await user.click(screen.getByRole("button", { name: /exchange rate/i }));
+  await user.type(screen.getByLabelText(/price currency 1/i), "CNY");
+  await user.click(screen.getByRole("button", { name: /fetch rate/i }));
+  await waitFor(() =>
+    expect(screen.getByLabelText(/price 1/i)).toHaveValue("7.1234")
+  );
+
+  await user.click(screen.getByRole("button", { name: /create schedule/i }));
+  await waitFor(() => expect(api.createSchedule).toHaveBeenCalledTimes(1));
+  const arg = (api.createSchedule as ReturnType<typeof vi.fn>).mock.calls[0][0];
+  expect(arg.postings[0].price).toEqual({
+    amount: "7.1234", currency: "CNY", total: false,
+  });
+  // Leg 2 (auto-balance) carries no price.
+  expect(arg.postings[1].price).toBeUndefined();
+});
 
 // ── Import from bean text ────────────────────────────────────────────────────
 

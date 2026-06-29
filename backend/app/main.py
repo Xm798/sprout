@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
 from app.db import init_db
-from app.routers import schedules, inbox, history, meta
+from app.routers import schedules, inbox, history, meta, exchange_rates
 
 app = FastAPI(title="Sprout")
 
@@ -21,6 +21,7 @@ app.include_router(schedules.router, prefix="/api")
 app.include_router(inbox.router, prefix="/api")
 app.include_router(history.router, prefix="/api")
 app.include_router(meta.router, prefix="/api")
+app.include_router(exchange_rates.router, prefix="/api")
 
 
 @app.on_event("startup")
