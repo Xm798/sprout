@@ -31,8 +31,11 @@ def _materialization_horizon(config: AppConfig, today: datetime.date) -> datetim
     return today + datetime.timedelta(days=config.lookahead_days)
 
 
-def materialize_occurrences(session: Session, config: AppConfig, today: datetime.date) -> int:
-    horizon = _materialization_horizon(config, today)
+def materialize_occurrences(
+    session: Session, config: AppConfig, today: datetime.date,
+    horizon: datetime.date | None = None,
+) -> int:
+    horizon = horizon if horizon is not None else _materialization_horizon(config, today)
     created = 0
     schedules = session.exec(select(Schedule).where(Schedule.status == "active")).all()
     for sch in schedules:

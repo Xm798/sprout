@@ -548,3 +548,24 @@ def test_update_schedule_same_rule_keeps_pendings(session, config, today):
         )
     ).all()
     assert len(pendings) == 5
+
+
+def test_materialize_honors_explicit_horizon(session, config):
+    from app.models import Schedule, Occurrence
+    from sqlmodel import select
+    session.add(Schedule(
+        name="rent", interval_unit="month", interval_count=1,
+        anchor_date=datetime.date(2026, 1, 1), status="active", postings=[],
+    ))
+    session.commit()
+    config.lookahead_days = 0
+    today = datetime.date(2026, 1, 1)
+    # Default horizon (lookahead 0) yields just the anchor occurrence.
+    services.materialize_occurrences(session, config, today)
+    base = len(session.exec(select(Occurrence)).all())
+    # Explicit 70-day horizon reaches Feb 1 and Mar 1 too.
+    services.materialize_occurrences(session, config, today,
+                                     horizon=today + datetime.timedelta(days=70))
+    after = session.exec(select(Occurrence)).all()
+    assert len(after) > base
+    assert datetime.date(2026, 3, 1) in {o.due_date for o in after}
