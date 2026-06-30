@@ -90,6 +90,20 @@ export interface ConfirmBody {
 
 export type PreviewBody = ConfirmBody;
 
+export interface NotificationChannel {
+  name: string;
+  url: string;        // "••••" when masked from the server
+  enabled: boolean;
+}
+
+export interface NotificationSettings {
+  notify_enabled: boolean;
+  notify_lead_days: number;
+  notify_time: string;        // "HH:MM"
+  notify_timezone: string;    // IANA or ""
+  notify_channels: NotificationChannel[];
+}
+
 export interface AppConfig {
   id: number;
   ledger_main_file: string;

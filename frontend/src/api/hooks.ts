@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "./client";
-import type { AppConfig, ConfirmBody, ParseBeanRequest, PreviewBody, ScheduleCreate } from "./types";
+import type { AppConfig, ConfirmBody, NotificationSettings, ParseBeanRequest, PreviewBody, ScheduleCreate } from "./types";
 
 export const qk = {
   schedules: ["schedules"] as const,
@@ -10,6 +10,7 @@ export const qk = {
   accounts: ["accounts"] as const,
   currencies: ["currencies"] as const,
   config: ["config"] as const,
+  notifications: ["notifications"] as const,
   beanFiles: ["bean-files"] as const,
   preview: (id: number, body: PreviewBody) => ["preview", id, body] as const,
   // Under the "history" prefix so history-wide invalidation refreshes it too.
@@ -183,4 +184,20 @@ export function useUpdateConfig() {
     mutationFn: (body: AppConfig) => api.updateConfig(body),
     onSuccess: () => qc.invalidateQueries({ queryKey: qk.config }),
   });
+}
+
+export function useNotifications() {
+  return useQuery({ queryKey: qk.notifications, queryFn: api.getNotifications });
+}
+
+export function useUpdateNotifications() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: NotificationSettings) => api.updateNotifications(body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.notifications }),
+  });
+}
+
+export function useTestNotification() {
+  return useMutation({ mutationFn: (name?: string) => api.testNotification(name) });
 }
