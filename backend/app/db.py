@@ -3,11 +3,9 @@ from pathlib import Path
 
 from alembic import command
 from alembic.config import Config
-from alembic.script import ScriptDirectory
 from fastapi import HTTPException
-from sqlalchemy import inspect
 from sqlalchemy.engine import make_url
-from sqlmodel import SQLModel, Session, create_engine
+from sqlmodel import Session, create_engine
 
 from app.config import AppConfig, config_from_env
 from app import models  # noqa: F401  ensure tables are registered
@@ -49,25 +47,10 @@ def _alembic_config() -> Config:
     return Config(str(ini_path))
 
 
-def _adopt_pre_alembic_db(cfg: Config) -> None:
-    """Databases created by the old SQLModel.create_all path already have the
-    baseline tables but no alembic_version row. Running `upgrade` on them would
-    try to CREATE TABLE over existing tables and fail, so stamp them at the
-    baseline revision first — its schema matches what create_all produced.
-    A fresh database has no tables and is left untouched for upgrade to build."""
-    tables = set(inspect(engine).get_table_names())
-    if "alembic_version" in tables:
-        return  # already under Alembic's control
-    if tables & set(SQLModel.metadata.tables):
-        base = ScriptDirectory.from_config(cfg).get_base()
-        command.stamp(cfg, base)
-
-
 def init_db() -> None:
     """Bring the database schema up to date by running Alembic migrations,
     then seed the singleton AppConfig row if it is missing."""
     cfg = _alembic_config()
-    _adopt_pre_alembic_db(cfg)
     command.upgrade(cfg, "head")
     with Session(engine) as session:
         existing = session.get(AppConfig, 1)

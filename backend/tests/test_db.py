@@ -1,9 +1,7 @@
 import datetime
 
-from sqlalchemy import inspect, text
-from sqlmodel import SQLModel
+from sqlalchemy import inspect
 
-import app.db as db_module
 from app.db import _alembic_config, make_engine
 
 
@@ -63,28 +61,6 @@ def test_alembic_upgrade_builds_schema_on_fresh_sqlite(tmp_path, monkeypatch):
     assert any(set(u["column_names"]) == {"schedule_id", "due_date"} for u in uniques)
     indexes = {i["name"] for i in insp.get_indexes("occurrence")}
     assert "ix_occurrence_schedule_id" in indexes
-
-
-def test_init_db_adopts_pre_alembic_database(tmp_path, monkeypatch):
-    """A database created by the old SQLModel.create_all path (tables present,
-    no alembic_version) must be adopted via stamp — not crash trying to
-    CREATE TABLE over existing tables."""
-    db_file = tmp_path / "legacy.db"
-    legacy_engine = make_engine(f"sqlite:///{db_file}")
-    SQLModel.metadata.create_all(legacy_engine)  # legacy schema, no alembic_version
-    assert "alembic_version" not in inspect(legacy_engine).get_table_names()
-
-    monkeypatch.setenv("SPROUT_DATABASE_URL", f"sqlite:///{db_file}")
-    monkeypatch.setattr(db_module, "engine", legacy_engine)
-
-    db_module.init_db()  # must not raise
-    db_module.init_db()  # idempotent
-
-    insp = inspect(legacy_engine)
-    assert "alembic_version" in insp.get_table_names()
-    with legacy_engine.connect() as c:
-        version = c.execute(text("select version_num from alembic_version")).scalar()
-    assert version is not None
 
 
 def test_schedule_model_has_target_file_default_none(session):
