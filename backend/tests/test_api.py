@@ -515,3 +515,37 @@ def test_test_endpoint_returns_per_channel_results(client):
     with patch("app.routers.meta.send_to_channels", return_value={"ios": True}):
         r = client.post("/api/config/notifications/test", json={})
     assert r.status_code == 200 and r.json() == {"ios": True}
+
+
+# ── GET/PUT /config must not leak or clobber notify_* (NEW-2) ─────────────────
+
+_NOTIFY_SETTINGS = {
+    "notify_enabled": True, "notify_lead_days": 2,
+    "notify_time": "09:00", "notify_timezone": "UTC",
+    "notify_channels": [{"name": "bark", "url": "https://bark.example/secret", "enabled": True}],
+}
+
+
+def test_get_config_excludes_notify_fields(client):
+    """GET /api/config must NOT expose notify_channels or any raw token."""
+    client.put("/api/config/notifications", json=_NOTIFY_SETTINGS)
+    cfg = client.get("/api/config").json()
+    for field in ("notify_channels", "notify_enabled", "notify_lead_days",
+                  "notify_time", "notify_timezone"):
+        assert field not in cfg, f"GET /config leaked {field}"
+    assert "secret" not in str(cfg)
+
+
+def test_put_config_does_not_clobber_notify_channels(client):
+    """PUT /api/config with a normal body (no notify fields) must not overwrite stored notify_channels."""
+    client.put("/api/config/notifications", json=_NOTIFY_SETTINGS)
+
+    # Fetch current config (which now excludes notify_* per the GET fix) and update a non-notify field.
+    cfg = client.get("/api/config").json()
+    r = client.put("/api/config", json={**cfg, "lookahead_days": 3})
+    assert r.status_code == 200
+
+    # notify_channels must survive unchanged — verify via the dedicated endpoint.
+    notif = client.get("/api/config/notifications").json()
+    assert len(notif["notify_channels"]) == 1
+    assert notif["notify_channels"][0]["name"] == "bark"

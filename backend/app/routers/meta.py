@@ -63,7 +63,10 @@ def currencies(session: Session = Depends(get_session)) -> list[str]:
     return load_currencies(_config(session).ledger_main_file)
 
 
-@router.get("/config", response_model=AppConfig)
+_NOTIFY_FIELDS = {"notify_enabled", "notify_channels", "notify_lead_days", "notify_time", "notify_timezone"}
+
+
+@router.get("/config", response_model=AppConfig, response_model_exclude=_NOTIFY_FIELDS)
 def get_config(session: Session = Depends(get_session)) -> AppConfig:
     return _config(session)
 
@@ -71,7 +74,7 @@ def get_config(session: Session = Depends(get_session)) -> AppConfig:
 @router.put("/config", response_model=AppConfig)
 def update_config(payload: AppConfig, session: Session = Depends(get_session)) -> AppConfig:
     cfg = _config(session)
-    data = payload.model_dump(exclude={"id"})
+    data = payload.model_dump(exclude={"id"} | _NOTIFY_FIELDS)
     for key, value in data.items():
         setattr(cfg, key, value)
     session.add(cfg)
