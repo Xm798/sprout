@@ -535,6 +535,12 @@ def test_get_config_excludes_notify_fields(client):
         assert field not in cfg, f"GET /config leaked {field}"
     assert "secret" not in str(cfg)
 
+    # PUT /api/config must also not leak notify_channels in response
+    r = client.put("/api/config", json={**cfg, "lookahead_days": 5})
+    assert r.status_code == 200
+    put_response = r.json()
+    assert "notify_channels" not in put_response, "PUT /config leaked notify_channels"
+
 
 def test_put_config_does_not_clobber_notify_channels(client):
     """PUT /api/config with a normal body (no notify fields) must not overwrite stored notify_channels."""

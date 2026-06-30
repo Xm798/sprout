@@ -568,6 +568,7 @@ def test_materialize_honors_explicit_horizon(session, config):
                                      horizon=today + datetime.timedelta(days=70))
     after = session.exec(select(Occurrence)).all()
     assert len(after) > base
+    assert datetime.date(2026, 3, 1) in {o.due_date for o in after}
 
 
 # ── NotificationLog cascade deletes (NEW-1) ───────────────────────────────────

@@ -71,7 +71,7 @@ def get_config(session: Session = Depends(get_session)) -> AppConfig:
     return _config(session)
 
 
-@router.put("/config", response_model=AppConfig)
+@router.put("/config", response_model=AppConfig, response_model_exclude=_NOTIFY_FIELDS)
 def update_config(payload: AppConfig, session: Session = Depends(get_session)) -> AppConfig:
     cfg = _config(session)
     data = payload.model_dump(exclude={"id"} | _NOTIFY_FIELDS)
