@@ -459,3 +459,59 @@ def test_inbox_respects_lookahead_ceiling(client):
     today_str = str(datetime.date.today())
     future = [r for r in rows if r["due_date"] > today_str]
     assert future == [], f"Future occurrences leaked into inbox: {future}"
+
+
+# ── Notification settings API ─────────────────────────────────────────────────
+
+def test_put_notifications_validates_time_and_tz(client):
+    bad_time = client.put("/api/config/notifications", json={
+        "notify_enabled": True, "notify_lead_days": 1, "notify_time": "25:00",
+        "notify_timezone": "", "notify_channels": []})
+    assert bad_time.status_code == 422
+    bad_tz = client.put("/api/config/notifications", json={
+        "notify_enabled": True, "notify_lead_days": 1, "notify_time": "08:00",
+        "notify_timezone": "Not/AZone", "notify_channels": []})
+    assert bad_tz.status_code == 422
+
+
+def test_put_then_get_masks_urls(client):
+    r = client.put("/api/config/notifications", json={
+        "notify_enabled": True, "notify_lead_days": 2, "notify_time": "08:00",
+        "notify_timezone": "UTC",
+        "notify_channels": [{"name": "ios", "url": "bark://h/secret", "enabled": True}]})
+    assert r.status_code == 200
+    got = client.get("/api/config/notifications").json()
+    assert got["notify_channels"][0]["url"] == "••••"      # masked on read
+    assert got["notify_timezone"] == "UTC"
+
+
+def test_put_with_masked_url_keeps_stored_url(client):
+    client.put("/api/config/notifications", json={
+        "notify_enabled": True, "notify_lead_days": 2, "notify_time": "08:00",
+        "notify_timezone": "UTC",
+        "notify_channels": [{"name": "ios", "url": "bark://h/secret", "enabled": True}]})
+    # Re-save with masked url (user only toggled enabled) — stored url must survive.
+    client.put("/api/config/notifications", json={
+        "notify_enabled": True, "notify_lead_days": 2, "notify_time": "08:00",
+        "notify_timezone": "UTC",
+        "notify_channels": [{"name": "ios", "url": "••••", "enabled": False}]})
+    from app.db import get_config
+    # Inspect raw stored value through a fresh request-independent read.
+    cfg = client.get("/api/config/notifications").json()
+    assert cfg["notify_channels"][0]["enabled"] is False
+    # Send a test and confirm the real (unmasked) url is used.
+    from unittest.mock import patch
+    with patch("app.routers.meta.send_to_channels", return_value={"ios": True}) as send:
+        client.post("/api/config/notifications/test", json={"channel_name": "ios"})
+    assert send.call_args.args[0][0]["url"] == "bark://h/secret"
+
+
+def test_test_endpoint_returns_per_channel_results(client):
+    client.put("/api/config/notifications", json={
+        "notify_enabled": True, "notify_lead_days": 0, "notify_time": "08:00",
+        "notify_timezone": "UTC",
+        "notify_channels": [{"name": "ios", "url": "bark://h/k", "enabled": True}]})
+    from unittest.mock import patch
+    with patch("app.routers.meta.send_to_channels", return_value={"ios": True}):
+        r = client.post("/api/config/notifications/test", json={})
+    assert r.status_code == 200 and r.json() == {"ios": True}
