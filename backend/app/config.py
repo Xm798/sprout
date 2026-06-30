@@ -1,7 +1,7 @@
 import os
 from typing import Optional
 
-from sqlalchemy import Column, JSON
+from sqlalchemy import Column, JSON, text
 from sqlalchemy.ext.mutable import MutableList
 from sqlmodel import SQLModel, Field
 
@@ -23,7 +23,7 @@ class AppConfig(SQLModel, table=True):
     notify_enabled: bool = False
     notify_channels: list[dict] = Field(
         default_factory=list,
-        sa_column=Column(MutableList.as_mutable(JSON), nullable=False, server_default="[]"),
+        sa_column=Column(MutableList.as_mutable(JSON), nullable=False, server_default=text("'[]'")),
     )
     notify_lead_days: int = 0
     notify_time: str = "08:00"        # HH:MM, wall-clock in notify_timezone

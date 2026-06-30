@@ -20,8 +20,8 @@ def upgrade() -> None:
     op.add_column("appconfig", sa.Column("notify_enabled", sa.Boolean(), nullable=False, server_default=sa.false()))
     op.add_column("appconfig", sa.Column("notify_channels", sa.JSON(), nullable=False, server_default=sa.text("'[]'")))
     op.add_column("appconfig", sa.Column("notify_lead_days", sa.Integer(), nullable=False, server_default="0"))
-    op.add_column("appconfig", sa.Column("notify_time", sqlmodel.sql.sqltypes.AutoString(), nullable=False, server_default="08:00"))
-    op.add_column("appconfig", sa.Column("notify_timezone", sqlmodel.sql.sqltypes.AutoString(), nullable=False, server_default=""))
+    op.add_column("appconfig", sa.Column("notify_time", sqlmodel.sql.sqltypes.AutoString(), nullable=False, server_default=sa.text("'08:00'")))
+    op.add_column("appconfig", sa.Column("notify_timezone", sqlmodel.sql.sqltypes.AutoString(), nullable=False, server_default=sa.text("''")))
     op.create_table(
         "notificationlog",
         sa.Column("id", sa.Integer(), nullable=False),

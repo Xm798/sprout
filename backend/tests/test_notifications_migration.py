@@ -1,6 +1,7 @@
 """The notifications migration must apply cleanly to a database that already
 has rows (the server_default path). conftest builds schema via create_all and
 never exercises Alembic, so this is the only migration coverage."""
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -16,7 +17,6 @@ def test_upgrade_on_populated_db(tmp_path):
     env_url = {"SPROUT_DATABASE_URL": url}
 
     # Bring an empty DB to the PREVIOUS head, then insert a config + occurrence row.
-    import os
     env = {**os.environ, **env_url}
     subprocess.run(
         [sys.executable, "-m", "alembic", "upgrade", "c18c6c73309d"],
