@@ -29,6 +29,7 @@
   "common": {
     "loading": "Loading…",
     "saving": "Saving…",
+    "save": "Save",
     "cancel": "Cancel",
     "scheduleFallback": "Schedule {{id}}",
     "status": {
@@ -167,6 +168,19 @@
       "warningsTitle": "Imported, but check:",
       "overwriteConfirm": "This will replace what you've already entered. Continue?"
     }
+  },
+  "notify": {
+    "title": "Notifications",
+    "enabled": "Enable due reminders",
+    "leadDays": "Days before due",
+    "time": "Daily time",
+    "timezone": "Timezone",
+    "channelName": "Name",
+    "appriseUrl": "Apprise URL",
+    "test": "Test",
+    "testAll": "Test all",
+    "addChannel": "Add channel",
+    "saved": "Notification settings saved"
   },
   "settings": {
     "title": "Settings",

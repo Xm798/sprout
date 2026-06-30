@@ -29,6 +29,7 @@
   "common": {
     "loading": "加载中…",
     "saving": "保存中…",
+    "save": "保存",
     "cancel": "取消",
     "scheduleFallback": "计划 {{id}}",
     "status": {
@@ -165,6 +166,19 @@
       "warningsTitle": "已导入，但请检查：",
       "overwriteConfirm": "这将覆盖你已填写的内容，确定继续？"
     }
+  },
+  "notify": {
+    "title": "通知",
+    "enabled": "启用到期提醒",
+    "leadDays": "提前天数",
+    "time": "每日时间",
+    "timezone": "时区",
+    "channelName": "名称",
+    "appriseUrl": "Apprise URL",
+    "test": "测试",
+    "testAll": "全部测试",
+    "addChannel": "添加通道",
+    "saved": "通知设置已保存"
   },
   "settings": {
     "title": "设置",

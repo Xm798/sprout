@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
 
 import { useConfig, useCurrencies, useUpdateConfig } from "@/api/hooks";
+import NotificationsSettings from "@/components/NotificationsSettings";
 import type { AppConfig } from "@/api/types";
 import { Button } from "@/components/ui/button";
 import { Combobox } from "@/components/ui/combobox";
@@ -177,6 +178,8 @@ export function SettingsPage() {
           </div>
         </form>
       )}
+
+      <NotificationsSettings />
     </div>
   );
 }
