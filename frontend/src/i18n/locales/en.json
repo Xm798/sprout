@@ -172,6 +172,7 @@
   "notify": {
     "title": "Notifications",
     "enabled": "Enable due reminders",
+    "description": "Remind me before each recurring payment is due",
     "leadDays": "Days before due",
     "time": "Daily time",
     "timezone": "Timezone",

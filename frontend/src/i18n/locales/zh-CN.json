@@ -170,6 +170,7 @@
   "notify": {
     "title": "通知",
     "enabled": "启用到期提醒",
+    "description": "在每笔定期付款到期前提醒我",
     "leadDays": "提前天数",
     "time": "每日时间",
     "timezone": "时区",

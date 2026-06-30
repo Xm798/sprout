@@ -79,7 +79,7 @@ export default function NotificationsSettings() {
     <Card>
       <CardHeader>
         <CardTitle>{t("notify.title")}</CardTitle>
-        <CardDescription>{t("notify.enabled")}</CardDescription>
+        <CardDescription>{t("notify.description")}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         {/* Enable toggle */}
