@@ -6,7 +6,7 @@ from typing import Optional
 from sqlmodel import Session, select
 
 from app.config import AppConfig
-from app.models import Schedule, Occurrence, ScheduleCreate
+from app.models import Schedule, Occurrence, ScheduleCreate, NotificationLog
 from app.due_engine import compute_due_dates
 from app.bean_format import format_transaction, apply_beanfmt
 from app.postings import Posting, parse_postings, dump_postings, validate_postings, validate_overrides, struct_key
@@ -430,6 +430,8 @@ def update_schedule(
         # A pending the new rule no longer produces is stale — drop it.
         # Skipped rows are explicit user decisions and stay, like confirmed ones.
         if occ.status == "pending" and occ.due_date not in valid_dates:
+            for nl in session.exec(select(NotificationLog).where(NotificationLog.occurrence_id == occ.id)).all():
+                session.delete(nl)
             session.delete(occ)
             continue
         if not occ.override_amounts:
@@ -456,6 +458,8 @@ def delete_schedule(session: Session, schedule_id: int) -> None:
         select(Occurrence).where(Occurrence.schedule_id == schedule_id)
     ).all()
     for occ in occs:
+        for nl in session.exec(select(NotificationLog).where(NotificationLog.occurrence_id == occ.id)).all():
+            session.delete(nl)
         session.delete(occ)
     session.delete(sch)
     session.commit()

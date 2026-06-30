@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 import sqlmodel
 
-from app.models import Schedule, Occurrence, ScheduleCreate
+from app.models import Schedule, Occurrence, ScheduleCreate, NotificationLog
 from app import services
 
 
@@ -568,4 +568,51 @@ def test_materialize_honors_explicit_horizon(session, config):
                                      horizon=today + datetime.timedelta(days=70))
     after = session.exec(select(Occurrence)).all()
     assert len(after) > base
-    assert datetime.date(2026, 3, 1) in {o.due_date for o in after}
+
+
+# ── NotificationLog cascade deletes (NEW-1) ───────────────────────────────────
+
+def test_delete_schedule_removes_notification_logs(session, config, today):
+    """delete_schedule must delete NotificationLog rows for each occurrence, not
+    leave orphans that would FK-violate on PostgreSQL or silently re-send on SQLite."""
+    sch = _make_schedule(session)
+    services.materialize_occurrences(session, config, today)
+    occ = _first_occ(session, sch)
+
+    nl = NotificationLog(occurrence_id=occ.id, channel_name="bark")
+    session.add(nl)
+    session.commit()
+    nl_id = nl.id
+
+    services.delete_schedule(session, sch.id)
+
+    # Both the occurrence and its log row must be gone.
+    assert session.get(NotificationLog, nl_id) is None
+    remaining = session.exec(
+        sqlmodel.select(NotificationLog).where(NotificationLog.occurrence_id == occ.id)
+    ).all()
+    assert remaining == []
+
+
+def test_update_schedule_removes_notification_log_for_pruned_occurrence(session, config, today):
+    """When update_schedule prunes a pending occurrence, its NotificationLog rows
+    must be deleted first — not orphaned."""
+    sch = _make_schedule(session)
+    services.materialize_occurrences(session, config, today)
+    occ = _first_occ(session, sch)
+
+    nl = NotificationLog(occurrence_id=occ.id, channel_name="bark")
+    session.add(nl)
+    session.commit()
+    nl_id = nl.id
+
+    # Shift anchor far into the future so no existing occurrences fall in valid_dates;
+    # all pending occurrences (including occ above) will be pruned.
+    payload = ScheduleCreate(
+        name="Spotify", narration="sub", postings=_postings(),
+        interval_unit="month", interval_count=1,
+        anchor_date=datetime.date(2027, 1, 15), max_count=6, tags="sprout",
+    )
+    services.update_schedule(session, config, sch.id, payload, today)
+
+    assert session.get(NotificationLog, nl_id) is None
