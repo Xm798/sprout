@@ -12,6 +12,8 @@ dependencies = [
     "python-dateutil>=2.9",
     "psycopg[binary]>=3.2",
     "alembic>=1.18.4",
+    "apprise>=1.11",
+    "apscheduler>=3.10",
 ]
 
 [project.optional-dependencies]
