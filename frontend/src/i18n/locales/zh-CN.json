@@ -143,7 +143,9 @@
       "fetch": "拉取汇率",
       "fetching": "拉取中…",
       "remove": "移除",
-      "fetchFailedToast": "拉取汇率失败"
+      "fetchFailedToast": "拉取汇率失败",
+      "errorIncomplete": "请同时填写汇率和计价货币，或移除该汇率。",
+      "errorNotNumber": "汇率必须是数字。"
     },
     "narration": "摘要",
     "narrationPlaceholder": "可选备注",

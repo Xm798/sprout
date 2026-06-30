@@ -51,6 +51,9 @@ class RateCacheEntry(SQLModel, table=True):
     """One cached exchange rate for a (base, quote, date, source) tuple.
 
     ``rate`` is a Decimal serialized as a string to match posting amounts.
+    ``rate_date`` is the requested date (the cache key); ``effective_date`` is
+    the date the rate is actually for (e.g. the prior ECB business day on a
+    weekend), reported as as_of so cache hits and misses agree.
     ``fetched_at`` drives TTL: fiat (Frankfurter) is re-fetched daily, crypto
     (CoinGecko) every few minutes — see app.exchange_rates."""
 
@@ -59,6 +62,7 @@ class RateCacheEntry(SQLModel, table=True):
     rate_date: datetime.date = Field(primary_key=True)
     source: str = Field(primary_key=True)
     rate: str
+    effective_date: datetime.date
     fetched_at: datetime.datetime
 
 

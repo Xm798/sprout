@@ -28,6 +28,7 @@ def upgrade() -> None:
     sa.Column('rate_date', sa.Date(), nullable=False),
     sa.Column('source', sqlmodel.sql.sqltypes.AutoString(), nullable=False),
     sa.Column('rate', sqlmodel.sql.sqltypes.AutoString(), nullable=False),
+    sa.Column('effective_date', sa.Date(), nullable=False),
     sa.Column('fetched_at', sa.DateTime(), nullable=False),
     sa.PrimaryKeyConstraint('base', 'quote', 'rate_date', 'source')
     )

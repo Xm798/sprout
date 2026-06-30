@@ -7,7 +7,7 @@ when a value is missing or stale.
 """
 
 import datetime
-from decimal import Decimal
+from decimal import Context, Decimal
 from typing import Callable, Optional
 
 import httpx
@@ -55,6 +55,15 @@ COINGECKO_IDS = {
     "DOGE": "dogecoin",
     "LTC": "litecoin",
 }
+
+
+def _quantize_sig(value: Decimal, sig: int = 12) -> Decimal:
+    """Cap a rate to ``sig`` significant figures. Inverting a large crypto price
+    (1 / 409172) otherwise yields a 28-digit quotient that beancount renders and
+    validates badly; short values pass through unchanged."""
+    if value == 0:
+        return value
+    return Context(prec=sig).create_decimal(value)
 
 
 def is_crypto(code: str) -> bool:
@@ -107,14 +116,15 @@ def cache_get(
     on: datetime.date,
     source: str,
     now: datetime.datetime,
-) -> Decimal | None:
-    """Return the cached rate if a fresh entry exists, else None."""
+) -> RateCacheEntry | None:
+    """Return the cached entry if a fresh one exists, else None. Returns the
+    whole entry so callers see the stored effective_date alongside the rate."""
     entry = session.get(RateCacheEntry, (base, quote, on, source))
     if entry is None:
         return None
     if now - entry.fetched_at >= TTL[source]:
         return None
-    return Decimal(entry.rate)
+    return entry
 
 
 def cache_put(
@@ -124,6 +134,7 @@ def cache_put(
     on: datetime.date,
     source: str,
     rate: Decimal,
+    effective_date: datetime.date,
     now: datetime.datetime,
 ) -> None:
     """Insert or refresh the cached rate for this (base, quote, date, source)."""
@@ -131,25 +142,33 @@ def cache_put(
     if entry is None:
         entry = RateCacheEntry(
             base=base, quote=quote, rate_date=on, source=source,
-            rate=str(rate), fetched_at=now,
+            rate=str(rate), effective_date=effective_date, fetched_at=now,
         )
     else:
         entry.rate = str(rate)
+        entry.effective_date = effective_date
         entry.fetched_at = now
     session.add(entry)
     session.commit()
 
 
 def _network_fetch(
-    source: str, base: str, quote: str, on: datetime.date
+    source: str,
+    base: str,
+    quote: str,
+    on: datetime.date,
+    *,
+    transport: Optional[httpx.BaseTransport] = None,
 ) -> tuple[Decimal, datetime.date]:
     """Hit the upstream provider and return (rate, effective_date).
 
     Frankfurter is queried for the requested date (it falls back to the most
     recent ECB business day on its own); CoinGecko only serves live prices, so
-    the effective date is the requested date."""
+    the effective date is the requested date. Both upstream failures and
+    well-formed responses missing the requested symbol surface as RateError so
+    the router can map them to 502 rather than leaking a 500."""
     try:
-        with httpx.Client(timeout=HTTP_TIMEOUT) as client:
+        with httpx.Client(timeout=HTTP_TIMEOUT, transport=transport) as client:
             if source == "frankfurter":
                 resp = client.get(
                     f"{FRANKFURTER_URL}/{on.isoformat()}",
@@ -164,9 +183,9 @@ def _network_fetch(
             )
             resp.raise_for_status()
             price = parse_coingecko(resp.json(), coin_id, vs)
-            rate = (Decimal(1) / price) if invert else price
+            rate = _quantize_sig(Decimal(1) / price) if invert else price
             return rate, on
-    except httpx.HTTPError as exc:
+    except (httpx.HTTPError, ValueError) as exc:
         raise RateError(f"{source} request failed: {exc}") from exc
 
 
@@ -184,15 +203,25 @@ def get_rate(
     base, quote = base.upper(), quote.upper()
     now = now or datetime.datetime.now()
     on = on or now.date()
+    # An identity conversion is always 1; skip the cache and the upstream call
+    # (Frankfurter omits the base from its own rates map and would 500 here).
+    if base == quote:
+        return RateQuote(base=base, quote=quote, rate="1",
+                         source="identity", as_of=on, cached=False)
     source = provider_for(base, quote)
+    # CoinGecko only serves the current price, so a stale requested date can't be
+    # honoured; key the cache and report as_of under today rather than mislabel a
+    # live price with a past date.
+    if source == "coingecko":
+        on = now.date()
 
     cached = cache_get(session, base, quote, on, source, now)
     if cached is not None:
-        return RateQuote(base=base, quote=quote, rate=str(cached),
-                         source=source, as_of=on, cached=True)
+        return RateQuote(base=base, quote=quote, rate=cached.rate,
+                         source=source, as_of=cached.effective_date, cached=True)
 
     fetch = fetch or _network_fetch
     rate, as_of = fetch(source, base, quote, on)
-    cache_put(session, base, quote, on, source, rate, now)
+    cache_put(session, base, quote, on, source, rate, as_of, now)
     return RateQuote(base=base, quote=quote, rate=str(rate),
                      source=source, as_of=as_of, cached=False)

@@ -110,14 +110,30 @@ function scheduleToDraft(s: Schedule): Draft {
   };
 }
 
-// A half-filled price row (revealed but not completed) is dropped rather than
-// submitted, since the backend rejects a price with a non-numeric amount.
+// An untouched price row (revealed but left entirely blank) is dropped on
+// submit. Anything partially or invalidly filled is caught earlier by
+// priceErrorKey, so by the time this runs a non-empty price is valid.
 function cleanPrice(price?: Price | null): Price | null {
   if (!price) return null;
   const amount = price.amount.trim();
   const currency = price.currency.trim().toUpperCase();
-  if (amount === "" || currency === "") return null;
+  if (amount === "" && currency === "") return null;
   return { amount, currency, total: price.total };
+}
+
+// Validate a revealed price row. Both-blank is fine (it will be dropped); a row
+// with only one of amount/currency, or a non-numeric amount, is a mistake the
+// user must fix or clear rather than have silently dropped or 422'd by save.
+function priceErrorKey(
+  price?: Price | null
+): "errorIncomplete" | "errorNotNumber" | null {
+  if (!price) return null;
+  const amount = price.amount.trim();
+  const currency = price.currency.trim();
+  if (amount === "" && currency === "") return null;
+  if (amount === "" || currency === "") return "errorIncomplete";
+  if (!/^-?\d*\.?\d+$/.test(amount)) return "errorNotNumber";
+  return null;
 }
 
 function toPayload(draft: Draft): ScheduleCreate {
@@ -184,6 +200,7 @@ export function ScheduleForm({
   const [rateMeta, setRateMeta] = useState<
     Record<string, { source: string; asOf: string }>
   >({});
+  const [priceError, setPriceError] = useState<string | null>(null);
 
   // Known backend sentinels get a localized message; anything else (raw
   // beancount syntax error) is wrapped so the CN UI never shows a bare blob.
@@ -250,9 +267,25 @@ export function ScheduleForm({
     }));
   }
 
-  function setPriceField(leg: DraftPosting, patch: Partial<Price>) {
-    const base: Price = leg.price ?? { amount: "", currency: "", total: false };
-    setLeg(leg.id, { price: { ...base, ...patch } });
+  // Functional update keyed by id: read the *current* price so an in-flight
+  // fetch resolving after the user edits the same leg can't clobber it via a
+  // stale captured value.
+  function setPriceField(legId: string, patch: Partial<Price>) {
+    touched.current = true;
+    setDraft((d) => ({
+      ...d,
+      postings: d.postings.map((p) =>
+        p.id === legId
+          ? {
+              ...p,
+              price: {
+                ...(p.price ?? { amount: "", currency: "", total: false }),
+                ...patch,
+              },
+            }
+          : p
+      ),
+    }));
   }
 
   function clearPrice(leg: DraftPosting) {
@@ -273,7 +306,7 @@ export function ScheduleForm({
     setFetchingId(leg.id);
     try {
       const q = await api.getExchangeRate(base, quote);
-      setPriceField(leg, { amount: q.rate, currency: quote });
+      setPriceField(leg.id, { amount: q.rate, currency: quote });
       setRateMeta((m) => ({ ...m, [leg.id]: { source: q.source, asOf: q.as_of } }));
     } catch (err) {
       toast.error(t("scheduleForm.price.fetchFailedToast"), {
@@ -299,6 +332,14 @@ export function ScheduleForm({
 
   function submit(e: FormEvent) {
     e.preventDefault();
+    const errKey = draft.postings
+      .map((p) => priceErrorKey(p.price))
+      .find((k): k is "errorIncomplete" | "errorNotNumber" => k !== null);
+    if (errKey) {
+      setPriceError(t(`scheduleForm.price.${errKey}`));
+      return;
+    }
+    setPriceError(null);
     if (schedule) {
       update.mutate(
         { id: schedule.id, body: toPayload(draft) },
@@ -468,12 +509,12 @@ export function ScheduleForm({
                         inputMode="decimal"
                         placeholder={t("scheduleForm.price.amountPlaceholder")}
                         value={leg.price?.amount ?? ""}
-                        onChange={(e) => setPriceField(leg, { amount: e.target.value })}
+                        onChange={(e) => setPriceField(leg.id, { amount: e.target.value })}
                       />
                       <Combobox
                         aria-label={t("scheduleForm.priceCurrencyN", { n: i + 1 })}
                         value={leg.price?.currency ?? ""}
-                        onChange={(v) => setPriceField(leg, { currency: v })}
+                        onChange={(v) => setPriceField(leg.id, { currency: v })}
                         suggestions={currencyOptions}
                         transform={(v) => v.toUpperCase()}
                         placeholder={t("scheduleForm.price.currencyPlaceholder")}
@@ -601,6 +642,12 @@ export function ScheduleForm({
           </p>
         )}
       </div>
+
+      {priceError && (
+        <p role="alert" className="text-sm text-destructive">
+          {priceError}
+        </p>
+      )}
 
       <Button type="submit" disabled={saving} className="w-full">
         {saving ? t("common.saving") : schedule ? t("scheduleForm.saveChanges") : t("scheduleForm.create")}

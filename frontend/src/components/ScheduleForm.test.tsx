@@ -261,6 +261,56 @@ test("submits the fetched price on the posting and drops an empty one", async ()
   expect(arg.postings[1].price).toBeUndefined();
 });
 
+async function fillRequired(user: ReturnType<typeof userEvent.setup>) {
+  await user.type(screen.getByLabelText(/^name$/i), "FX");
+  await user.type(screen.getByLabelText(/account 1/i), "Expenses:Subscription");
+  await user.type(screen.getByLabelText(/amount 1/i), "100");
+  await user.type(screen.getByLabelText(/account 2/i), "Assets:CreditCard");
+  await user.click(screen.getByLabelText(/starting from/i));
+  await user.click(await screen.findByRole("button", { name: /today/i }));
+}
+
+test("blocks submit when a price row has a rate but no currency", async () => {
+  const user = userEvent.setup();
+  renderWithProviders(<ScheduleForm />);
+  await fillRequired(user);
+
+  await user.click(screen.getByRole("button", { name: /exchange rate/i }));
+  await user.type(screen.getByLabelText(/price 1/i), "0.86"); // amount only
+
+  await user.click(screen.getByRole("button", { name: /create schedule/i }));
+  expect(await screen.findByText(/rate and its currency/i)).toBeInTheDocument();
+  expect(api.createSchedule).not.toHaveBeenCalled();
+});
+
+test("blocks submit when a price amount is not a number", async () => {
+  const user = userEvent.setup();
+  renderWithProviders(<ScheduleForm />);
+  await fillRequired(user);
+
+  await user.click(screen.getByRole("button", { name: /exchange rate/i }));
+  await user.type(screen.getByLabelText(/price currency 1/i), "CNY");
+  await user.type(screen.getByLabelText(/price 1/i), "abc");
+
+  await user.click(screen.getByRole("button", { name: /create schedule/i }));
+  expect(await screen.findByText(/must be a number/i)).toBeInTheDocument();
+  expect(api.createSchedule).not.toHaveBeenCalled();
+});
+
+test("an opened but empty price row is dropped and does not block submit", async () => {
+  const user = userEvent.setup();
+  renderWithProviders(<ScheduleForm />);
+  await fillRequired(user);
+
+  // Reveal the price row but leave it empty.
+  await user.click(screen.getByRole("button", { name: /exchange rate/i }));
+  await user.click(screen.getByRole("button", { name: /create schedule/i }));
+
+  await waitFor(() => expect(api.createSchedule).toHaveBeenCalledTimes(1));
+  const arg = (api.createSchedule as ReturnType<typeof vi.fn>).mock.calls[0][0];
+  expect(arg.postings[0].price).toBeNull();
+});
+
 // ── Import from bean text ────────────────────────────────────────────────────
 
 async function openImportAndParse(user: ReturnType<typeof userEvent.setup>) {
