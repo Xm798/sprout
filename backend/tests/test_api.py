@@ -429,3 +429,30 @@ def test_parse_rejects_bad_input(client, text):
     r = client.post("/api/schedules/parse", json={"text": text})
     assert r.status_code == 400, r.text
     assert r.json()["detail"]
+
+
+# ── inbox lookahead ceiling ────────────────────────────────────────────────────
+
+def test_inbox_respects_lookahead_ceiling(client):
+    """Occurrences materialized beyond today+lookahead_days must not appear in the inbox."""
+    import app.services as services
+    from app.models import Schedule
+    from app.db import get_config
+
+    with _db_session() as session:
+        session.add(Schedule(
+            name="rent", interval_unit="month", interval_count=1,
+            anchor_date=datetime.date(2026, 1, 1), status="active", postings=[],
+        ))
+        session.commit()
+        cfg = get_config(session)
+        # Materialize well beyond today; lookahead_days=0 so the ceiling is today.
+        services.materialize_occurrences(
+            session, cfg, datetime.date.today(),
+            horizon=datetime.date(2027, 1, 1),
+        )
+
+    rows = client.get("/api/inbox").json()
+    today_str = str(datetime.date.today())
+    future = [r for r in rows if r["due_date"] > today_str]
+    assert future == [], f"Future occurrences leaked into inbox: {future}"
