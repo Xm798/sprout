@@ -446,6 +446,9 @@ def test_inbox_respects_lookahead_ceiling(client):
         ))
         session.commit()
         cfg = get_config(session)
+        cfg.lookahead_days = 0
+        session.add(cfg)
+        session.commit()
         # Materialize well beyond today; lookahead_days=0 so the ceiling is today.
         services.materialize_occurrences(
             session, cfg, datetime.date.today(),
