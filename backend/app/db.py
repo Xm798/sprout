@@ -4,6 +4,7 @@ from pathlib import Path
 from alembic import command
 from alembic.config import Config
 from fastapi import HTTPException
+from sqlalchemy import event
 from sqlalchemy.engine import make_url
 from sqlmodel import Session, create_engine
 
@@ -34,7 +35,15 @@ def make_engine(url: str | None = None):
     connect_args = {}
     if is_sqlite_url(resolved):
         connect_args["check_same_thread"] = False
-    return create_engine(resolved, connect_args=connect_args)
+    eng = create_engine(resolved, connect_args=connect_args)
+    if is_sqlite_url(resolved):
+        @event.listens_for(eng, "connect")
+        def _sqlite_pragmas(dbapi_conn, _record):
+            cur = dbapi_conn.cursor()
+            cur.execute("PRAGMA journal_mode=WAL")
+            cur.execute("PRAGMA busy_timeout=5000")
+            cur.close()
+    return eng
 
 
 engine = make_engine()

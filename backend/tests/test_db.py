@@ -73,3 +73,14 @@ def test_schedule_model_has_target_file_default_none(session):
     session.commit()
     session.refresh(sch)
     assert sch.target_file is None
+
+
+def test_sqlite_engine_sets_wal_and_busy_timeout(tmp_path):
+    from app.db import make_engine
+    import sqlalchemy as sa
+
+    eng = make_engine(f"sqlite:///{tmp_path/'x.db'}")
+    with eng.connect() as c:
+        assert c.execute(sa.text("PRAGMA journal_mode")).scalar().lower() == "wal"
+        assert int(c.execute(sa.text("PRAGMA busy_timeout")).scalar()) >= 5000
+    eng.dispose()
