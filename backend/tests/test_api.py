@@ -545,3 +545,107 @@ def test_exchange_rate_endpoint_maps_upstream_failure_to_502(client, monkeypatch
     r = client.get("/api/exchange-rates/rate",
                    params={"base": "HKD", "quote": "CNY"})
     assert r.status_code == 502, r.text
+
+
+# ── amortization preview + event endpoints ────────────────────────────────────
+
+def test_amortization_preview_endpoint(client):
+    r = client.post("/api/loans/amortization", json={
+        "loan": {
+            "principal": "1000000",
+            "annual_rate": "0.0485",
+            "term_count": 360,
+            "method": "equal_payment",
+        },
+        "anchor_date": "2026-01-01",
+        "interval_count": 1,
+        "events": [],
+    })
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert len(body["rows"]) == 360
+    assert body["rows"][-1]["balance_after"] == "0.00"
+    assert body["total_interest"] is not None
+    assert body["payoff_date"] is not None
+    # payoff_date must equal the last row's due_date.
+    assert body["payoff_date"] == body["rows"][-1]["due_date"]
+    # Decimals must be serialized as strings, not native JSON floats.
+    assert isinstance(body["rows"][0]["principal"], str)
+    assert isinstance(body["rows"][0]["interest"], str)
+    assert isinstance(body["total_interest"], str)
+
+
+def test_add_event_rejects_on_or_before_confirmed_boundary(client):
+    # Create a 360-month loan with anchor_date 2026-01-15.
+    sid = client.post("/api/schedules", json=new_loan_payload()).json()["id"]
+
+    # GET /inbox materializes past-due occurrences (seqs 1-6 with today >= 2026-07-01).
+    inbox = client.get("/api/inbox").json()
+    assert len(inbox) >= 3, f"expected at least 3 pending loan occurrences, got {len(inbox)}"
+
+    # Confirm seq 3 (due 2026-03-15) to establish the freeze boundary.
+    seq3 = next(o for o in inbox if o.get("loan_seq") == 3)
+    r = client.post(f"/api/inbox/{seq3['id']}/confirm", json={})
+    assert r.status_code == 200, r.text  # freeze boundary is now 2026-03-15
+
+    prepayment_base = {
+        "kind": "prepayment",
+        "amount": "5000",
+        "mode": "reduce_payment",
+    }
+
+    # Exactly at the boundary → 422.
+    r = client.post(f"/api/schedules/{sid}/events",
+                    json={**prepayment_base, "date": "2026-03-15"})
+    assert r.status_code == 422, r.text
+
+    # Before the boundary → 422.
+    r = client.post(f"/api/schedules/{sid}/events",
+                    json={**prepayment_base, "date": "2026-01-15"})
+    assert r.status_code == 422, r.text
+
+    # Not a payment date at all → 422.
+    r = client.post(f"/api/schedules/{sid}/events",
+                    json={**prepayment_base, "date": "2026-05-16"})
+    assert r.status_code == 422, r.text
+
+    # Strictly after the boundary AND on a payment date (seq 5: 2026-05-15) → 200.
+    r = client.post(f"/api/schedules/{sid}/events",
+                    json={**prepayment_base, "date": "2026-05-15"})
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert len(data["events"]) == 1
+    assert data["events"][0]["date"] == "2026-05-15"
+    assert data["events"][0]["kind"] == "prepayment"
+
+    # The prepayment occurrence must materialise on the next inbox fetch.
+    inbox2 = client.get("/api/inbox").json()
+    prepay_occs = [o for o in inbox2 if o.get("loan_event") == "prepayment"]
+    assert len(prepay_occs) >= 1
+    assert any(o["due_date"] == "2026-05-15" for o in prepay_occs)
+
+
+def test_delete_event(client):
+    sid = client.post("/api/schedules", json=new_loan_payload()).json()["id"]
+
+    # With no confirmed occurrences the freeze boundary is unconstrained; add an
+    # event on the first payment date (2026-01-15 = seq 1).
+    r = client.post(f"/api/schedules/{sid}/events", json={
+        "kind": "prepayment",
+        "date": "2026-01-15",
+        "amount": "1000",
+        "mode": "reduce_payment",
+    })
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert len(data["events"]) == 1
+    event_id = data["events"][0]["id"]
+
+    # Delete it → 200 and events list is empty.
+    r = client.delete(f"/api/schedules/{sid}/events/{event_id}")
+    assert r.status_code == 200, r.text
+    assert r.json()["events"] == []
+
+    # Second delete of the same id → 404.
+    r = client.delete(f"/api/schedules/{sid}/events/{event_id}")
+    assert r.status_code == 404, r.text

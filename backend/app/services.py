@@ -95,6 +95,24 @@ def valid_occurrence_keys(sch: Schedule, horizon: datetime.date) -> set[tuple]:
     }
 
 
+def reconcile_loan_pending(session: Session, config: AppConfig, sch: Schedule, today: datetime.date) -> None:
+    """Prune stale pending occurrences for a loan schedule after its events or params change.
+
+    Does not commit — the caller is responsible for committing the session.
+    """
+    horizon = _materialization_horizon(config, today)
+    valid = valid_occurrence_keys(sch, horizon)
+    pending = session.exec(
+        select(Occurrence).where(
+            Occurrence.schedule_id == sch.id, Occurrence.status == "pending"
+        )
+    ).all()
+    for occ in pending:
+        key = (occ.loan_event, occ.event_id, occ.due_date)
+        if key not in valid:
+            session.delete(occ)
+
+
 def materialize_occurrences(
     session: Session, config: AppConfig, today: datetime.date,
     horizon: datetime.date | None = None,
@@ -666,18 +684,9 @@ def update_schedule(
     horizon = _materialization_horizon(config, today)
 
     if sch.kind == "loan":
-        # For loans, prune pending occurrences whose amortization key no longer
-        # exists in the updated table. Confirmed and skipped rows are kept intact.
-        valid = valid_occurrence_keys(sch, horizon)
-        pending = session.exec(
-            select(Occurrence).where(
-                Occurrence.schedule_id == schedule_id, Occurrence.status == "pending"
-            )
-        ).all()
-        for occ in pending:
-            key = (occ.loan_event, occ.event_id, occ.due_date)
-            if key not in valid:
-                session.delete(occ)
+        # Prune pending occurrences whose amortization key no longer exists in the
+        # updated table. Confirmed and skipped rows are kept intact.
+        reconcile_loan_pending(session, config, sch, today)
     else:
         # Dates the edited rule still produces within the materialization horizon.
         valid_dates = set(compute_due_dates(

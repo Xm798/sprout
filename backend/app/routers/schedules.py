@@ -1,4 +1,7 @@
 import datetime
+import uuid
+from decimal import Decimal
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -7,7 +10,7 @@ from sqlmodel import Session, select
 from app.bean_parse import ParseError, ParsedTransaction, parse_transaction
 from app.config import AppConfig
 from app.db import get_session, get_config
-from app.models import Schedule, ScheduleBase, ScheduleCreate, ScheduleRead
+from app.models import Occurrence, Schedule, ScheduleBase, ScheduleCreate, ScheduleRead
 from app.postings import parse_postings, validate_postings, headline, dump_postings
 from app.writer import validate_target_file
 from app import services
@@ -28,6 +31,7 @@ def _read(sch: Schedule) -> ScheduleRead:
     base = {f: getattr(sch, f) for f in ScheduleBase.model_fields}
     return ScheduleRead(
         **base, id=sch.id, postings=postings,
+        kind=sch.kind, loan=sch.loan, events=sch.events or [],
         headline_amount=amount, headline_currency=currency,
         created_at=sch.created_at, updated_at=sch.updated_at,
     )
@@ -100,3 +104,87 @@ def delete(schedule_id: int, session: Session = Depends(get_session)) -> dict:
     except LookupError as exc:
         raise HTTPException(404, str(exc))
     return {"ok": True}
+
+
+class EventBody(BaseModel):
+    id: Optional[str] = None
+    kind: str
+    date: datetime.date
+    amount: Optional[Decimal] = None     # prepayment
+    mode: Optional[str] = None           # prepayment: shorten_term | reduce_payment
+    annual_rate: Optional[Decimal] = None  # rate_change
+
+
+@router.post("/{schedule_id}/events", response_model=ScheduleRead)
+def add_event(
+    schedule_id: int, body: EventBody, session: Session = Depends(get_session)
+) -> ScheduleRead:
+    config = get_config(session)
+    sch = session.get(Schedule, schedule_id)
+    if sch is None:
+        raise HTTPException(404, "schedule not found")
+    if sch.kind != "loan":
+        raise HTTPException(422, "events are only supported for loan schedules")
+
+    # Payment dates are regular (non-prepayment) due dates in the current table.
+    table = services._loan_table(sch)
+    payment_dates = {row.due_date for row in table if not row.is_prepayment}
+    if body.date not in payment_dates:
+        raise HTTPException(422, f"event date {body.date} is not a scheduled payment date")
+
+    # Freeze boundary: event must land strictly after the last confirmed occurrence.
+    confirmed_occs = session.exec(
+        select(Occurrence).where(
+            Occurrence.schedule_id == schedule_id,
+            Occurrence.status == "confirmed",
+        )
+    ).all()
+    if confirmed_occs:
+        freeze_boundary = max(occ.due_date for occ in confirmed_occs)
+        if body.date <= freeze_boundary:
+            raise HTTPException(
+                422,
+                f"event date {body.date} must be strictly after the last confirmed "
+                f"installment ({freeze_boundary})",
+            )
+
+    event_id = body.id or uuid.uuid4().hex
+    event_dict: dict = {"id": event_id, "kind": body.kind, "date": body.date.isoformat()}
+    if body.amount is not None:
+        event_dict["amount"] = str(body.amount)
+    if body.mode is not None:
+        event_dict["mode"] = body.mode
+    if body.annual_rate is not None:
+        event_dict["annual_rate"] = str(body.annual_rate)
+
+    sch.events = [*sch.events, event_dict]
+    sch.updated_at = datetime.datetime.now()
+    services.reconcile_loan_pending(session, config, sch, datetime.date.today())
+    session.add(sch)
+    session.commit()
+    session.refresh(sch)
+    return _read(sch)
+
+
+@router.delete("/{schedule_id}/events/{event_id}", response_model=ScheduleRead)
+def delete_event(
+    schedule_id: int, event_id: str, session: Session = Depends(get_session)
+) -> ScheduleRead:
+    config = get_config(session)
+    sch = session.get(Schedule, schedule_id)
+    if sch is None:
+        raise HTTPException(404, "schedule not found")
+    if sch.kind != "loan":
+        raise HTTPException(422, "events are only supported for loan schedules")
+
+    remaining = [e for e in (sch.events or []) if e.get("id") != event_id]
+    if len(remaining) == len(sch.events or []):
+        raise HTTPException(404, f"event {event_id!r} not found on this schedule")
+
+    sch.events = remaining
+    sch.updated_at = datetime.datetime.now()
+    services.reconcile_loan_pending(session, config, sch, datetime.date.today())
+    session.add(sch)
+    session.commit()
+    session.refresh(sch)
+    return _read(sch)
