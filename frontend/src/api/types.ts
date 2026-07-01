@@ -91,6 +91,7 @@ export interface ConfirmBody {
 export type PreviewBody = ConfirmBody;
 
 export interface NotificationChannel {
+  id?: string;        // stable per-channel identifier; generated client-side on add
   name: string;
   url: string;        // "••••" when masked from the server
   enabled: boolean;

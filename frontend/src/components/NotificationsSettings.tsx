@@ -45,7 +45,10 @@ export default function NotificationsSettings() {
   const addChannel = () =>
     setForm({
       ...form,
-      notify_channels: [...form.notify_channels, { name: "", url: "", enabled: true }],
+      notify_channels: [
+        ...form.notify_channels,
+        { id: crypto.randomUUID(), name: "", url: "", enabled: true },
+      ],
     });
 
   const removeChannel = (i: number) =>
@@ -56,7 +59,9 @@ export default function NotificationsSettings() {
 
   const save = async () => {
     try {
-      await update.mutateAsync(form);
+      // F9: re-seed from the masked response so URL inputs show "••••" after saving
+      const saved = await update.mutateAsync(form);
+      setForm(saved);
       toast.success(t("notify.saved"));
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : String(e));
@@ -156,6 +161,7 @@ export default function NotificationsSettings() {
                 type="button"
                 variant="outline"
                 size="sm"
+                disabled={!c.name || !c.url}
                 onClick={() => runTest(c.name)}
               >
                 <TestTube2 className="h-4 w-4" />
