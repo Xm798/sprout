@@ -46,18 +46,26 @@ def run_due_reminders(session: Session, cfg: AppConfig, now: datetime.datetime) 
         )
     ).all()
 
+    occ_ids = [o.id for o in due]
+    already_by_occ: dict[int, set[str]] = {}
+    if occ_ids:
+        for nl in session.exec(
+            select(NotificationLog).where(NotificationLog.occurrence_id.in_(occ_ids))
+        ).all():
+            already_by_occ.setdefault(nl.occurrence_id, set()).add(nl.channel_name)
+
+    sch_by_id = {s.id: s for s in session.exec(
+        select(Schedule).where(Schedule.id.in_({o.schedule_id for o in due}))
+    ).all()} if due else {}
+
     sent = 0
     for occ in due:
         try:
-            already = set(session.exec(
-                select(NotificationLog.channel_name).where(
-                    NotificationLog.occurrence_id == occ.id
-                )
-            ).all())
+            already = already_by_occ.get(occ.id, set())
             pending = [c for c in chans if c["name"] not in already]
             if not pending:
                 continue
-            sch = session.get(Schedule, occ.schedule_id)
+            sch = sch_by_id.get(occ.schedule_id)
             if sch is None:
                 continue
             title, body = _reminder_text(sch, occ)

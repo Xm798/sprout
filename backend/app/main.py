@@ -18,12 +18,13 @@ def _scheduler_enabled() -> bool:
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     init_db()
-    if _scheduler_enabled():
+    enabled = _scheduler_enabled()
+    if enabled:
         _scheduler.start()
     try:
         yield
     finally:
-        if _scheduler_enabled():
+        if enabled:
             _scheduler.shutdown()
 
 

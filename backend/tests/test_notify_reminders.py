@@ -46,12 +46,7 @@ def test_dedup_does_not_resend_logged_channel(session, config):
 
 
 def test_failed_channel_not_logged_and_retried(session, config):
-    config.notify_enabled = True
-    config.notify_lead_days = 3
-    config.notify_channels = [{"name": "ios", "url": "bark://h/k", "enabled": True}]
-    session.add(Schedule(name="rent", interval_unit="month", interval_count=1,
-                         anchor_date=datetime.date(2026, 6, 9), status="active", postings=[]))
-    session.commit()
+    _setup(session, config, lead=3)
     now = datetime.datetime(2026, 6, 8, 9, 0)
     with patch("app.notify.reminders.send_to_channels", return_value={"ios": "err"}):
         reminders.run_due_reminders(session, config, now)

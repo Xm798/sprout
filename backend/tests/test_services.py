@@ -573,17 +573,21 @@ def test_materialize_honors_explicit_horizon(session, config):
 
 # ── NotificationLog cascade deletes (NEW-1) ───────────────────────────────────
 
-def test_delete_schedule_removes_notification_logs(session, config, today):
-    """delete_schedule must delete NotificationLog rows for each occurrence, not
-    leave orphans that would FK-violate on PostgreSQL or silently re-send on SQLite."""
+def _occ_with_log(session, config, today) -> tuple:
+    """Make a schedule, materialize, grab first occurrence, attach a NotificationLog."""
     sch = _make_schedule(session)
     services.materialize_occurrences(session, config, today)
     occ = _first_occ(session, sch)
-
     nl = NotificationLog(occurrence_id=occ.id, channel_name="bark")
     session.add(nl)
     session.commit()
-    nl_id = nl.id
+    return sch, occ, nl.id
+
+
+def test_delete_schedule_removes_notification_logs(session, config, today):
+    """delete_schedule must delete NotificationLog rows for each occurrence, not
+    leave orphans that would FK-violate on PostgreSQL or silently re-send on SQLite."""
+    sch, occ, nl_id = _occ_with_log(session, config, today)
 
     services.delete_schedule(session, sch.id)
 
@@ -598,14 +602,7 @@ def test_delete_schedule_removes_notification_logs(session, config, today):
 def test_update_schedule_removes_notification_log_for_pruned_occurrence(session, config, today):
     """When update_schedule prunes a pending occurrence, its NotificationLog rows
     must be deleted first — not orphaned."""
-    sch = _make_schedule(session)
-    services.materialize_occurrences(session, config, today)
-    occ = _first_occ(session, sch)
-
-    nl = NotificationLog(occurrence_id=occ.id, channel_name="bark")
-    session.add(nl)
-    session.commit()
-    nl_id = nl.id
+    sch, occ, nl_id = _occ_with_log(session, config, today)
 
     # Shift anchor far into the future so no existing occurrences fall in valid_dates;
     # all pending occurrences (including occ above) will be pruned.

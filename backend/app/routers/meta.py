@@ -9,6 +9,7 @@ from app.db import get_session, get_config as _config
 from app.config import AppConfig
 from app.ledger import load_accounts, load_currencies
 from app.notify.channels import send_to_channels
+from app.notify.reminders import enabled_channels
 from app.writer import resolve_root
 
 MASK = "••••"
@@ -125,11 +126,10 @@ def put_notifications(payload: NotificationSettings,
 @router.post("/config/notifications/test")
 def test_notifications(body: TestBody, session: Session = Depends(get_session)) -> dict:
     cfg = _config(session)
-    chans = [c for c in (cfg.notify_channels or []) if c.get("url")]
     if body.channel_name:
-        chans = [c for c in chans if c["name"] == body.channel_name]
+        chans = [c for c in (cfg.notify_channels or []) if c.get("url") and c["name"] == body.channel_name]
     else:
-        chans = [c for c in chans if c.get("enabled")]
+        chans = enabled_channels(cfg)
     if not chans:
         raise HTTPException(404, "no matching channel")
     return send_to_channels(chans, "Sprout test", "Notifications are working ✅")

@@ -26,7 +26,7 @@ def inbox(session: Session = Depends(get_session)) -> list[Occurrence]:
     cfg = _config(session)
     today = datetime.date.today()
     services.materialize_occurrences(session, cfg, today)
-    ceiling = today + datetime.timedelta(days=cfg.lookahead_days)
+    ceiling = services.materialization_horizon(cfg, today)
     return session.exec(
         select(Occurrence)
         .where(Occurrence.status == "pending", Occurrence.due_date <= ceiling)
