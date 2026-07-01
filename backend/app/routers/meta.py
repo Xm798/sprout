@@ -1,4 +1,5 @@
 import re
+import uuid
 import zoneinfo
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -17,6 +18,7 @@ _TIME_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 
 
 class Channel(BaseModel):
+    id: str | None = None   # stable per-channel identifier; generated server-side if absent
     name: str
     url: str
     enabled: bool = True
@@ -35,7 +37,7 @@ class TestBody(BaseModel):
 
 
 def _masked(cfg: AppConfig) -> dict:
-    chans = [{"name": c["name"], "url": MASK if c.get("url") else "",
+    chans = [{"id": c.get("id", ""), "name": c["name"], "url": MASK if c.get("url") else "",
               "enabled": c.get("enabled", True)} for c in (cfg.notify_channels or [])]
     return {"notify_enabled": cfg.notify_enabled, "notify_lead_days": cfg.notify_lead_days,
             "notify_time": cfg.notify_time, "notify_timezone": cfg.notify_timezone,
@@ -102,16 +104,28 @@ def put_notifications(payload: NotificationSettings,
     if payload.notify_lead_days < 0:
         raise HTTPException(422, "notify_lead_days must be >= 0")
 
+    # F8: reject duplicate channel names in the payload
+    names = [ch.name for ch in payload.notify_channels]
+    if len(names) != len(set(names)):
+        raise HTTPException(422, "channel names must be unique")
+
     cfg = _config(session)
     existing = {c["name"]: c.get("url", "") for c in (cfg.notify_channels or [])}
+    # F6: build an id-keyed lookup so a rename (new name, masked URL, same id) resolves correctly
+    existing_by_id = {c["id"]: c.get("url", "") for c in (cfg.notify_channels or []) if c.get("id")}
     resolved: list[dict] = []
     for ch in payload.notify_channels:
         if not ch.name:
             raise HTTPException(422, "channel name required")
-        url = existing.get(ch.name, "") if ch.url == MASK else ch.url
+        if ch.url == MASK:
+            # Prefer id-based lookup; fall back to name lookup for older payloads without an id
+            url = existing_by_id.get(ch.id or "", "") or existing.get(ch.name, "")
+        else:
+            url = ch.url
         if not url:
             raise HTTPException(422, f"channel {ch.name} needs a URL")
-        resolved.append({"name": ch.name, "url": url, "enabled": ch.enabled})
+        chan_id = ch.id or uuid.uuid4().hex
+        resolved.append({"id": chan_id, "name": ch.name, "url": url, "enabled": ch.enabled})
 
     cfg.notify_enabled = payload.notify_enabled
     cfg.notify_lead_days = payload.notify_lead_days
@@ -126,7 +140,8 @@ def put_notifications(payload: NotificationSettings,
 @router.post("/config/notifications/test")
 def test_notifications(body: TestBody, session: Session = Depends(get_session)) -> dict:
     cfg = _config(session)
-    if body.channel_name:
+    # F7: None means "test all"; any explicit string (even "") means "test just this one"
+    if body.channel_name is not None:
         chans = [c for c in (cfg.notify_channels or []) if c.get("url") and c["name"] == body.channel_name]
     else:
         chans = enabled_channels(cfg)
