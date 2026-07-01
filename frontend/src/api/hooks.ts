@@ -87,7 +87,7 @@ export function useAddScheduleEvent() {
 export function useDeleteScheduleEvent() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, eventId }: { id: number; eventId: number }) =>
+    mutationFn: ({ id, eventId }: { id: number; eventId: string }) =>
       api.deleteScheduleEvent(id, eventId),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: qk.schedules });

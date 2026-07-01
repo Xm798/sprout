@@ -10,6 +10,7 @@ from sqlmodel import Session, select
 from app.bean_parse import ParseError, ParsedTransaction, parse_transaction
 from app.config import AppConfig
 from app.db import get_session, get_config
+from app.loan import DegenerateLoan
 from app.models import Occurrence, Schedule, ScheduleBase, ScheduleCreate, ScheduleRead
 from app.postings import parse_postings, validate_postings, headline, dump_postings
 from app.writer import validate_target_file
@@ -115,6 +116,17 @@ class EventBody(BaseModel):
     annual_rate: Optional[Decimal] = None  # rate_change
 
 
+def _get_freeze_boundary(session: Session, schedule_id: int) -> Optional[datetime.date]:
+    """Return the last confirmed occurrence's due_date for this schedule, or None."""
+    confirmed = session.exec(
+        select(Occurrence).where(
+            Occurrence.schedule_id == schedule_id,
+            Occurrence.status == "confirmed",
+        )
+    ).all()
+    return max(occ.due_date for occ in confirmed) if confirmed else None
+
+
 @router.post("/{schedule_id}/events", response_model=ScheduleRead)
 def add_event(
     schedule_id: int, body: EventBody, session: Session = Depends(get_session)
@@ -133,20 +145,13 @@ def add_event(
         raise HTTPException(422, f"event date {body.date} is not a scheduled payment date")
 
     # Freeze boundary: event must land strictly after the last confirmed occurrence.
-    confirmed_occs = session.exec(
-        select(Occurrence).where(
-            Occurrence.schedule_id == schedule_id,
-            Occurrence.status == "confirmed",
+    freeze_boundary = _get_freeze_boundary(session, schedule_id)
+    if freeze_boundary is not None and body.date <= freeze_boundary:
+        raise HTTPException(
+            422,
+            f"event date {body.date} must be strictly after the last confirmed "
+            f"installment ({freeze_boundary})",
         )
-    ).all()
-    if confirmed_occs:
-        freeze_boundary = max(occ.due_date for occ in confirmed_occs)
-        if body.date <= freeze_boundary:
-            raise HTTPException(
-                422,
-                f"event date {body.date} must be strictly after the last confirmed "
-                f"installment ({freeze_boundary})",
-            )
 
     event_id = body.id or uuid.uuid4().hex
     event_dict: dict = {"id": event_id, "kind": body.kind, "date": body.date.isoformat()}
@@ -159,7 +164,10 @@ def add_event(
 
     sch.events = [*sch.events, event_dict]
     sch.updated_at = datetime.datetime.now()
-    services.reconcile_loan_pending(session, config, sch, datetime.date.today())
+    try:
+        services.reconcile_loan_pending(session, config, sch, datetime.date.today())
+    except (DegenerateLoan, ValueError) as exc:
+        raise HTTPException(422, str(exc))
     session.add(sch)
     session.commit()
     session.refresh(sch)
@@ -177,13 +185,27 @@ def delete_event(
     if sch.kind != "loan":
         raise HTTPException(422, "events are only supported for loan schedules")
 
-    remaining = [e for e in (sch.events or []) if e.get("id") != event_id]
-    if len(remaining) == len(sch.events or []):
+    # Find the target event first — needed for the freeze-boundary check.
+    target = next((e for e in (sch.events or []) if e.get("id") == event_id), None)
+    if target is None:
         raise HTTPException(404, f"event {event_id!r} not found on this schedule")
 
+    event_date = datetime.date.fromisoformat(target["date"])
+    freeze_boundary = _get_freeze_boundary(session, schedule_id)
+    if freeze_boundary is not None and event_date <= freeze_boundary:
+        raise HTTPException(
+            422,
+            f"event {event_id!r} is on {event_date}, at or before the last confirmed "
+            f"installment ({freeze_boundary}); frozen events cannot be removed",
+        )
+
+    remaining = [e for e in (sch.events or []) if e.get("id") != event_id]
     sch.events = remaining
     sch.updated_at = datetime.datetime.now()
-    services.reconcile_loan_pending(session, config, sch, datetime.date.today())
+    try:
+        services.reconcile_loan_pending(session, config, sch, datetime.date.today())
+    except (DegenerateLoan, ValueError) as exc:
+        raise HTTPException(422, str(exc))
     session.add(sch)
     session.commit()
     session.refresh(sch)

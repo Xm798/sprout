@@ -78,7 +78,7 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body),
     }),
-  deleteScheduleEvent: (id: number, eventId: number) =>
+  deleteScheduleEvent: (id: number, eventId: string) =>
     http<Schedule>(`/schedules/${id}/events/${eventId}`, { method: "DELETE" }),
 
   getInbox: () => http<Occurrence[]>("/inbox"),

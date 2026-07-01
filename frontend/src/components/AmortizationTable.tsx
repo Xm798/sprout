@@ -324,7 +324,7 @@ function EventActions({
                   disabled={del.isPending}
                   onClick={() =>
                     del.mutate(
-                      { id: scheduleId, eventId: ev.id as number },
+                      { id: scheduleId, eventId: ev.id! },
                       {
                         onSuccess: (schedule) =>
                           onChange(

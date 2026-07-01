@@ -35,7 +35,7 @@ export interface LoanData {
 export type PrepaymentMode = "shorten_term" | "reduce_payment";
 
 export interface AmortizationEvent {
-  id?: number;
+  id?: string; // uuid-hex string assigned by the backend
   kind: "prepayment" | "rate_change";
   date: string; // YYYY-MM-DD — must fall on a payment date
   amount?: string | null; // prepayment only
@@ -56,14 +56,14 @@ export interface AmortizationPreviewBody {
 }
 
 export interface AmortizationRow {
-  seq: number;
+  seq: number | null; // null for prepayment rows
   due_date: string;
   principal: string; // decimal serialized as string
   interest: string;
   payment: string;
   balance_after: string;
   is_prepayment: boolean;
-  event_id?: number | null;
+  event_id?: string | null; // uuid-hex string; only set on prepayment rows
 }
 
 export interface AmortizationResult {

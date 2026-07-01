@@ -550,6 +550,9 @@ def validate_loan(payload: ScheduleCreate) -> list[str]:
     if payload.loan is None:
         return ["kind='loan' requires a 'loan' dict with principal, annual_rate, term_count, method"]
 
+    if payload.interval_unit != "month":
+        errors.append("loan schedules must use interval_unit='month'")
+
     loan = payload.loan
 
     try:
@@ -631,10 +634,11 @@ def loan_terms_locked(session: Session, schedule_id: int, payload: ScheduleCreat
     """Return True if any confirmed occurrence exists AND the payload changes a loan base param.
 
     Base params are principal, annual_rate, term_count, method (inside loan) plus
-    anchor_date, interval_unit, interval_count (timing params).
+    anchor_date, interval_unit, interval_count (timing params). A kind flip
+    (loan → anything else) is also treated as a locked change.
     """
     sch = session.get(Schedule, schedule_id)
-    if sch is None or sch.kind != "loan" or payload.kind != "loan":
+    if sch is None or sch.kind != "loan":
         return False
 
     def _dec(d: Optional[dict], k: str) -> Optional[Decimal]:
@@ -643,17 +647,21 @@ def loan_terms_locked(session: Session, schedule_id: int, payload: ScheduleCreat
         v = d.get(k)
         return Decimal(str(v)) if v is not None else None
 
-    old = sch.loan or {}
-    new = payload.loan or {}
-    changed = (
-        payload.anchor_date != sch.anchor_date
-        or payload.interval_unit != sch.interval_unit
-        or payload.interval_count != sch.interval_count
-        or _dec(new, "principal") != _dec(old, "principal")
-        or _dec(new, "annual_rate") != _dec(old, "annual_rate")
-        or new.get("term_count") != old.get("term_count")
-        or new.get("method") != old.get("method")
-    )
+    if payload.kind != "loan":
+        # Kind flip on a confirmed loan is always a locked change.
+        changed = True
+    else:
+        old = sch.loan or {}
+        new = payload.loan or {}
+        changed = (
+            payload.anchor_date != sch.anchor_date
+            or payload.interval_unit != sch.interval_unit
+            or payload.interval_count != sch.interval_count
+            or _dec(new, "principal") != _dec(old, "principal")
+            or _dec(new, "annual_rate") != _dec(old, "annual_rate")
+            or new.get("term_count") != old.get("term_count")
+            or new.get("method") != old.get("method")
+        )
     if not changed:
         return False
 
