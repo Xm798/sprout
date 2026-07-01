@@ -461,6 +461,45 @@ def test_inbox_respects_lookahead_ceiling(client):
     assert future == [], f"Future occurrences leaked into inbox: {future}"
 
 
+# ── Model B: effective_horizon in inbox ───────────────────────────────────────
+
+def test_inbox_shows_occurrence_within_reminder_window(client):
+    """With notify_enabled=True and notify_lead_days=5, an occurrence due 3 days
+    from now (beyond lookahead_days=0 but within the lead window) must appear
+    in GET /api/inbox."""
+    from app.db import get_config
+
+    today = datetime.date.today()
+    anchor = str(today + datetime.timedelta(days=3))
+
+    with _db_session() as session:
+        cfg = get_config(session)
+        cfg.notify_enabled = True
+        cfg.notify_lead_days = 5
+        session.add(cfg)
+        session.commit()
+
+    client.post("/api/schedules", json=new_schedule_payload(anchor_date=anchor, max_count=1))
+    rows = client.get("/api/inbox").json()
+    assert any(r["due_date"] == anchor for r in rows), (
+        f"Expected occurrence at {anchor} in inbox but got: {[r['due_date'] for r in rows]}"
+    )
+
+
+def test_inbox_hides_occurrence_beyond_lookahead_when_notifications_off(client):
+    """With notify_enabled=False and lookahead_days=0, an occurrence due 3 days
+    from now must NOT appear in GET /api/inbox (lookahead governs)."""
+    # client fixture has notify_enabled=False (default) and lookahead_days=0
+    today = datetime.date.today()
+    anchor = str(today + datetime.timedelta(days=3))
+
+    client.post("/api/schedules", json=new_schedule_payload(anchor_date=anchor, max_count=1))
+    rows = client.get("/api/inbox").json()
+    assert not any(r["due_date"] == anchor for r in rows), (
+        f"Occurrence at {anchor} leaked into inbox with notifications off: {rows}"
+    )
+
+
 # ── Notification settings API ─────────────────────────────────────────────────
 
 def test_put_notifications_validates_time_and_tz(client):

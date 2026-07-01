@@ -31,6 +31,14 @@ def materialization_horizon(config: AppConfig, today: datetime.date) -> datetime
     return today + datetime.timedelta(days=config.lookahead_days)
 
 
+def effective_horizon(config: AppConfig, today: datetime.date) -> datetime.date:
+    """The furthest-out date the app must account for: the inbox lookahead OR the
+    reminder lead window (when notifications are on), whichever is larger. Keeps
+    reminded occurrences visible/confirmable and safe from schedule-edit pruning."""
+    lead = config.notify_lead_days if config.notify_enabled else 0
+    return today + datetime.timedelta(days=max(config.lookahead_days, lead))
+
+
 def _delete_occurrences(session: Session, occurrences: list[Occurrence]) -> None:
     """Delete occurrences and their NotificationLog rows (manual cascade — SQLite
     FK enforcement is off and Postgres would FK-violate on orphaned logs)."""
@@ -427,8 +435,9 @@ def update_schedule(
     sch.postings = dump_postings(payload.postings)
     sch.updated_at = datetime.datetime.now()
 
-    # Dates the edited rule still produces within the materialization horizon.
-    horizon = materialization_horizon(config, today)
+    # Dates the edited rule still produces within the effective horizon (covers
+    # both the inbox lookahead and the reminder lead window).
+    horizon = effective_horizon(config, today)
     valid_dates = set(compute_due_dates(
         payload.anchor_date, payload.interval_unit, payload.interval_count,
         horizon, payload.end_date, payload.max_count,

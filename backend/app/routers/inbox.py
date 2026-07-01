@@ -25,8 +25,8 @@ class PreviewBody(ConfirmBody):
 def inbox(session: Session = Depends(get_session)) -> list[Occurrence]:
     cfg = _config(session)
     today = datetime.date.today()
-    services.materialize_occurrences(session, cfg, today)
-    ceiling = services.materialization_horizon(cfg, today)
+    ceiling = services.effective_horizon(cfg, today)
+    services.materialize_occurrences(session, cfg, today, horizon=ceiling)
     return session.exec(
         select(Occurrence)
         .where(Occurrence.status == "pending", Occurrence.due_date <= ceiling)
