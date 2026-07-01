@@ -101,6 +101,22 @@ def test_init_db_adopts_pre_alembic_database(tmp_path, monkeypatch):
     assert version is not None
 
 
+def test_loan_schedule_and_occurrence_columns_roundtrip(session):
+    from app.models import Schedule, Occurrence
+    import datetime
+    sch = Schedule(name="Mortgage", interval_unit="month", interval_count=1,
+                   anchor_date=datetime.date(2026, 1, 1), kind="loan",
+                   loan={"principal": "1000000", "annual_rate": "0.0485",
+                         "term_count": 360, "method": "equal_payment"},
+                   events=[], postings=[])
+    session.add(sch); session.commit(); session.refresh(sch)
+    assert sch.kind == "loan" and sch.loan["term_count"] == 360
+    occ = Occurrence(schedule_id=sch.id, due_date=datetime.date(2026, 1, 1),
+                     loan_seq=1, loan_event="regular", event_id="")
+    session.add(occ); session.commit(); session.refresh(occ)
+    assert occ.loan_event == "regular" and occ.frozen_postings is None
+
+
 def test_schedule_model_has_target_file_default_none(session):
     from app.models import Schedule
     sch = Schedule(
