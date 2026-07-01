@@ -91,9 +91,25 @@ def amortize(terms: LoanTerms, events: list[Event] | None = None) -> list[Instal
         per_principal = money(terms.principal / terms.term_count)
 
     remaining = terms.term_count
+    im = terms.interval_months
     seq = 1
     ei = 0
     while balance > 0 and seq <= terms.term_count and remaining > 0:
+        due = _due_date(terms.start_date, seq, terms.interval_months)
+
+        # Apply events before the regular installment so rate_change takes effect
+        # on the same period; prepayments reduce the balance before the installment.
+        while ei < len(events) and events[ei].date == due and balance > 0:
+            ev = events[ei]; ei += 1
+            balance = _apply_event(ev, balance, r, rows, due)
+            if terms.method == "equal_payment":
+                payment, remaining, r = _recompute_equal_payment(ev, balance, r, payment, remaining, im)
+            else:
+                per_principal, remaining, r = _recompute_equal_principal(ev, balance, r, per_principal, remaining, im)
+
+        if balance <= 0 or remaining <= 0:
+            break
+
         interest = money(balance * r)
         if terms.method == "equal_payment":
             principal = payment - interest
@@ -103,21 +119,11 @@ def amortize(terms: LoanTerms, events: list[Event] | None = None) -> list[Instal
             principal = balance
         principal = money(principal)
         balance = money(balance - principal)
-        due = _due_date(terms.start_date, seq, terms.interval_months)
         rows.append(Installment(
             seq=seq, due_date=due, principal=principal, interest=interest,
             payment=money(principal + interest), balance_after=balance,
         ))
         remaining -= 1
-
-        # Apply any events landing on this payment date (regular-then-event order).
-        while ei < len(events) and events[ei].date == due and balance > 0:
-            ev = events[ei]; ei += 1
-            balance = _apply_event(ev, balance, r, rows, due)
-            if terms.method == "equal_payment":
-                payment, remaining = _recompute_equal_payment(ev, balance, r, payment, remaining)
-            else:
-                per_principal, remaining = _recompute_equal_principal(ev, balance, r, per_principal, remaining)
         seq += 1
 
     return rows
@@ -136,27 +142,36 @@ def _apply_event(ev: Event, balance: Decimal, r: Decimal,
     return balance
 
 
-def _recompute_equal_payment(ev, balance, r, payment, remaining):
+def _recompute_equal_payment(ev, balance, r, payment, remaining, interval_months):
     if balance <= 0:
-        return payment, 0
+        return payment, 0, r
     if ev.kind == "rate_change":
-        r = monthly_rate(ev.annual_rate, 1)                      # interval folded into rate upstream
-        return equal_payment_amount(balance, r, remaining), remaining
+        r = monthly_rate(ev.annual_rate, interval_months)
+        M = equal_payment_amount(balance, r, remaining)
+        if M <= money(balance * r):
+            raise DegenerateLoan("rate change makes payment <= interest; loan would not amortize")
+        return M, remaining, r
     if ev.mode == "shorten_term":
-        return payment, _remaining_count(balance, r, payment)
-    return equal_payment_amount(balance, r, remaining), remaining  # reduce_payment
+        return payment, _remaining_count(balance, r, payment), r
+    M = equal_payment_amount(balance, r, remaining)
+    if M <= money(balance * r):
+        raise DegenerateLoan("prepayment reduce_payment leaves payment <= interest")
+    return M, remaining, r  # reduce_payment
 
 
-def _recompute_equal_principal(ev, balance, r, per_principal, remaining):
+def _recompute_equal_principal(ev, balance, r, per_principal, remaining, interval_months):
     if balance <= 0:
-        return per_principal, 0
-    if ev.kind == "rate_change" or ev.mode == "reduce_payment":
-        return money(balance / remaining), remaining      # keep count, re-slice principal
+        return per_principal, 0, r
+    if ev.kind == "rate_change":
+        r = monthly_rate(ev.annual_rate, interval_months)
+        return money(balance / remaining), remaining, r
+    if ev.mode == "reduce_payment":
+        return money(balance / remaining), remaining, r
     # shorten_term: keep per_principal, loop to zero
     n = 0; b = balance
     while b > 0 and n < 100000:
         b = money(b - min(per_principal, b)); n += 1
-    return per_principal, n
+    return per_principal, n, r
 
 
 def validate_terms(terms: LoanTerms) -> None:

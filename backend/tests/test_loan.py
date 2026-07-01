@@ -134,3 +134,38 @@ def test_prepayment_exceeding_balance_settles_immediately():
     rows = amortize(terms, ev)
     assert rows[-1].balance_after == Decimal("0.00")
     assert rows[-1].is_prepayment                    # settled by the prepayment row
+
+
+def test_rate_change_reprices_and_zeroes():
+    from app.loan import amortize
+    terms = LoanTerms(principal=Decimal("1000000"), annual_rate=Decimal("0.0485"),
+                      term_count=360, method="equal_payment", start_date=date(2026, 1, 1))
+    # reset on the 25th payment date -> 5.60%
+    ev = [Event(id="r1", kind="rate_change", date=date(2028, 1, 1), annual_rate=Decimal("0.0560"))]
+    rows = amortize(terms, ev)
+    regular = [r for r in rows if not r.is_prepayment]
+    assert len(regular) == 360
+    assert rows[-1].balance_after == Decimal("0.00")
+    before = [r for r in regular if r.due_date < date(2028, 1, 1)][-1]
+    after = [r for r in regular if r.due_date >= date(2028, 1, 1)][0]
+    assert after.payment > before.payment            # higher rate -> higher payment
+
+
+def test_stacked_rate_changes_zero_out():
+    from app.loan import amortize
+    terms = LoanTerms(principal=Decimal("1000000"), annual_rate=Decimal("0.0485"),
+                      term_count=360, method="equal_payment", start_date=date(2026, 1, 1))
+    ev = [Event(id="r1", kind="rate_change", date=date(2028, 1, 1), annual_rate=Decimal("0.0560")),
+          Event(id="r2", kind="rate_change", date=date(2029, 1, 1), annual_rate=Decimal("0.0390"))]
+    rows = amortize(terms, ev)
+    assert rows[-1].balance_after == Decimal("0.00")
+
+
+def test_rate_change_hitting_degenerate_is_rejected():
+    from app.loan import amortize, DegenerateLoan
+    terms = LoanTerms(principal=Decimal("1000000"), annual_rate=Decimal("0.0485"),
+                      term_count=360, method="equal_payment", start_date=date(2026, 1, 1))
+    # absurd reset that makes payment <= interest on the remaining balance
+    ev = [Event(id="r1", kind="rate_change", date=date(2027, 1, 1), annual_rate=Decimal("5.0"))]
+    with pytest.raises(DegenerateLoan):
+        amortize(terms, ev)
