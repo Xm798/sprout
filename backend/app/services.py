@@ -1,5 +1,6 @@
 import datetime
 import logging
+from decimal import Decimal
 from pathlib import Path
 from typing import Optional
 
@@ -10,6 +11,7 @@ from app.models import Schedule, Occurrence, ScheduleCreate
 from app.due_engine import compute_due_dates
 from app.bean_format import format_transaction, apply_beanfmt
 from app.postings import Posting, parse_postings, dump_postings, validate_postings, validate_overrides, struct_key
+from app.loan import amortize, LoanTerms, Event
 from app.ledger import (
     ConflictError,  # noqa: F401  re-exported; routers reference services.ConflictError
     find_transaction,
@@ -24,6 +26,47 @@ from app.writer import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+class StaleOccurrence(Exception):
+    """A pending loan occurrence whose amortization row no longer exists."""
+
+
+def _loan_table(sch: Schedule) -> list:
+    terms = LoanTerms(**sch.loan, start_date=sch.anchor_date,
+                      interval_months=sch.interval_count)
+    return amortize(terms, [Event(**e) for e in (sch.events or [])])
+
+
+def _row_for(table: list, occ: Occurrence):
+    if occ.loan_event == "prepayment":
+        return next((r for r in table if r.is_prepayment and r.event_id == occ.event_id), None)
+    return next((r for r in table if r.seq == occ.loan_seq), None)
+
+
+def _fill(legs: list[Posting], inst) -> list[Posting]:
+    by_role = {"principal": inst.principal, "interest": inst.interest,
+               "payment": -inst.payment}        # payment leg is the outflow
+    out = []
+    for p in legs:
+        if p.role in by_role:
+            p = p.model_copy(update={"amount": str(by_role[p.role])})
+        out.append(p)
+    return out
+
+
+def resolve_postings(sch: Schedule, occ: Occurrence) -> list[Posting]:
+    if sch.kind != "loan":
+        return parse_postings(sch.postings)
+    legs = parse_postings(sch.postings)
+    if occ.status == "confirmed" and occ.frozen_postings is not None:
+        return parse_postings(occ.frozen_postings)
+    inst = _row_for(_loan_table(sch), occ)
+    if inst is None:
+        raise StaleOccurrence(f"occurrence {occ.id} has no amortization row")
+    if inst.is_prepayment:
+        legs = [p for p in legs if p.role != "interest"]
+    return _fill(legs, inst)
 
 
 def _materialization_horizon(config: AppConfig, today: datetime.date) -> datetime.date:

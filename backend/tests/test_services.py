@@ -550,6 +550,57 @@ def test_update_schedule_same_rule_keeps_pendings(session, config, today):
     assert len(pendings) == 5
 
 
+def test_resolve_postings_fixed_unchanged(session):
+    from app.services import resolve_postings
+    from app.models import Schedule, Occurrence
+    import datetime
+    sch = Schedule(name="s", interval_unit="month", interval_count=1,
+                   anchor_date=datetime.date(2026, 1, 1),
+                   postings=[{"id": "a", "account": "Expenses:X", "amount": "10", "currency": "CNY"},
+                             {"id": "b", "account": "Assets:Y", "amount": None, "currency": None}])
+    occ = Occurrence(schedule_id=1, due_date=datetime.date(2026, 1, 1))
+    legs = resolve_postings(sch, occ)
+    assert [p.amount for p in legs] == ["10", None]
+
+
+def test_resolve_postings_loan_pending_fills_split(session):
+    from app.services import resolve_postings
+    from app.models import Schedule, Occurrence
+    import datetime
+    sch = Schedule(name="m", kind="loan", interval_unit="month", interval_count=1,
+                   anchor_date=datetime.date(2026, 1, 1),
+                   loan={"principal": "1000000", "annual_rate": "0.0485",
+                         "term_count": 360, "method": "equal_payment"}, events=[],
+                   postings=[{"id": "p", "account": "Liabilities:Loan", "role": "principal", "currency": "CNY"},
+                             {"id": "i", "account": "Expenses:Int", "role": "interest", "currency": "CNY"},
+                             {"id": "c", "account": "Assets:Bank", "role": "payment", "currency": "CNY"}])
+    occ = Occurrence(schedule_id=1, due_date=datetime.date(2026, 1, 1), loan_seq=1, loan_event="regular")
+    legs = {p.role: p.amount for p in resolve_postings(sch, occ)}
+    assert legs["interest"] == "4041.67"                    # 1,000,000 * 0.0485/12
+    assert legs["payment"] == "-5276.92"                    # outflow negative
+    assert legs["principal"] == "1235.25"
+
+
+def test_resolve_postings_loan_confirmed_uses_frozen(session):
+    from app.services import resolve_postings
+    from app.models import Schedule, Occurrence
+    import datetime
+    sch = Schedule(name="m", kind="loan", interval_unit="month", interval_count=1,
+                   anchor_date=datetime.date(2026, 1, 1),
+                   loan={"principal": "1000000", "annual_rate": "0.0485", "term_count": 360,
+                         "method": "equal_payment"}, events=[],
+                   postings=[{"id": "p", "account": "Liabilities:Loan", "role": "principal", "currency": "CNY"},
+                             {"id": "i", "account": "Expenses:Int", "role": "interest", "currency": "CNY"},
+                             {"id": "c", "account": "Assets:Bank", "role": "payment", "currency": "CNY"}])
+    occ = Occurrence(schedule_id=1, due_date=datetime.date(2026, 1, 1), loan_seq=1,
+                     status="confirmed",
+                     frozen_postings=[{"id": "p", "account": "Liabilities:Loan", "amount": "1.00", "currency": "CNY", "role": "principal"},
+                                      {"id": "i", "account": "Expenses:Int", "amount": "2.00", "currency": "CNY", "role": "interest"},
+                                      {"id": "c", "account": "Assets:Bank", "amount": "-3.00", "currency": "CNY", "role": "payment"}])
+    legs = {p.role: p.amount for p in resolve_postings(sch, occ)}
+    assert legs == {"principal": "1.00", "interest": "2.00", "payment": "-3.00"}
+
+
 def test_materialize_honors_explicit_horizon(session, config):
     from app.models import Schedule, Occurrence
     from sqlmodel import select
