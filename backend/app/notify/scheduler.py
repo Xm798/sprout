@@ -47,7 +47,7 @@ def notification_tick() -> None:
             cfg = session.get(AppConfig, 1)
             if cfg is None or not should_run_now(cfg):
                 return
-            run_due_reminders(session, cfg, datetime.datetime.now())
+            run_due_reminders(session, cfg, _now_in_tz(cfg.notify_timezone))
     except Exception:
         logger.exception("notification tick failed")
 
