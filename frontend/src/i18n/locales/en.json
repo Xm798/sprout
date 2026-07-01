@@ -202,6 +202,37 @@
       "overwriteConfirm": "This will replace what you've already entered. Continue?"
     }
   },
+  "amortization": {
+    "title": "Amortization schedule",
+    "fillToPreview": "Enter the principal, rate, term and start date to preview the schedule.",
+    "previewFailed": "Couldn't render the schedule: {{error}}",
+    "totalInterest": "Total interest",
+    "payoffDate": "Payoff date",
+    "seq": "#",
+    "dueDate": "Date",
+    "principal": "Principal",
+    "interest": "Interest",
+    "payment": "Payment",
+    "balance": "Balance",
+    "prepaymentTag": "(prepayment)",
+    "eventKind": "Action",
+    "eventDate": "Date",
+    "prepayment": "Prepayment",
+    "rateChange": "Rate change (LPR)",
+    "prepaymentAmount": "Prepayment amount",
+    "prepaymentAmountPlaceholder": "e.g. 50000",
+    "prepaymentMode": "After prepayment",
+    "mode": {
+      "shorten_term": "Shorten term",
+      "reduce_payment": "Reduce payment"
+    },
+    "newRate": "New annual rate (%)",
+    "newRatePlaceholder": "e.g. 4.20",
+    "addEvent": "Apply",
+    "removeEvent": "Remove event",
+    "eventAddedToast": "Event applied",
+    "eventFailedToast": "Couldn't apply the event"
+  },
   "settings": {
     "title": "Settings",
     "subtitle": "Where and how Sprout writes Beancount transactions.",

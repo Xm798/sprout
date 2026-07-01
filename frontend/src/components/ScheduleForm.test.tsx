@@ -17,6 +17,13 @@ vi.mock("../api/client", () => ({
     updateSchedule: vi.fn().mockResolvedValue({ id: 7 }),
     parseTransaction: vi.fn(),
     getExchangeRate: vi.fn(),
+    previewAmortization: vi.fn().mockResolvedValue({
+      rows: [],
+      total_interest: "0",
+      payoff_date: "2026-01-01",
+    }),
+    addScheduleEvent: vi.fn(),
+    deleteScheduleEvent: vi.fn(),
   },
 }));
 

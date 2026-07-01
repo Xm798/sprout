@@ -1,6 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "./client";
-import type { AppConfig, ConfirmBody, ParseBeanRequest, PreviewBody, ScheduleCreate } from "./types";
+import type {
+  AmortizationPreviewBody,
+  AppConfig,
+  ConfirmBody,
+  ParseBeanRequest,
+  PreviewBody,
+  ScheduleCreate,
+  ScheduleEventBody,
+} from "./types";
 
 export const qk = {
   schedules: ["schedules"] as const,
@@ -12,6 +20,7 @@ export const qk = {
   config: ["config"] as const,
   beanFiles: ["bean-files"] as const,
   preview: (id: number, body: PreviewBody) => ["preview", id, body] as const,
+  amortization: (body: AmortizationPreviewBody) => ["amortization", body] as const,
   // Under the "history" prefix so history-wide invalidation refreshes it too.
   written: (id: number) => ["history", id, "written"] as const,
 };
@@ -48,6 +57,42 @@ export function useUpdateSchedule() {
 export function useParseTransaction() {
   return useMutation({
     mutationFn: (body: ParseBeanRequest) => api.parseTransaction(body),
+  });
+}
+
+// Live amortization preview for a draft loan. `enabled` gates it on complete
+// params; a bad request (422) is deterministic — don't retry it.
+export function usePreviewAmortization(body: AmortizationPreviewBody, enabled: boolean) {
+  return useQuery({
+    queryKey: qk.amortization(body),
+    queryFn: () => api.previewAmortization(body),
+    enabled,
+    retry: false,
+  });
+}
+
+export function useAddScheduleEvent() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: number; body: ScheduleEventBody }) =>
+      api.addScheduleEvent(id, body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: qk.schedules });
+      // A prepayment/rate change reshapes upcoming occurrences.
+      qc.invalidateQueries({ queryKey: qk.inbox });
+    },
+  });
+}
+
+export function useDeleteScheduleEvent() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, eventId }: { id: number; eventId: number }) =>
+      api.deleteScheduleEvent(id, eventId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: qk.schedules });
+      qc.invalidateQueries({ queryKey: qk.inbox });
+    },
   });
 }
 

@@ -24,6 +24,7 @@ import type {
   ScheduleCreate,
 } from "@/api/types";
 import { api } from "@/api/client";
+import { AmortizationTable } from "@/components/AmortizationTable";
 import { Button } from "@/components/ui/button";
 import { Combobox } from "@/components/ui/combobox";
 import { DatePicker } from "@/components/ui/date-picker";
@@ -36,7 +37,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { errorMessage } from "@/lib/utils";
+import { errorMessage, percentToDecimal } from "@/lib/utils";
 
 // "fixed" = current fixed-amount schedule; the two loan values map to method.
 type ScheduleKind = "fixed" | "equal_payment" | "equal_principal";
@@ -199,14 +200,6 @@ function priceErrorKey(
   if (amount === "" || currency === "") return "errorIncomplete";
   if (!/^-?\d*\.?\d+$/.test(amount)) return "errorNotNumber";
   return null;
-}
-
-// Convert percent string to decimal string, e.g. "4.85" -> "0.0485".
-// Uses toFixed(10) to avoid floating-point noise, then strips trailing zeros.
-function percentToDecimal(pct: string): string {
-  const num = parseFloat(pct);
-  if (isNaN(num)) return "0";
-  return String(parseFloat((num / 100).toFixed(10)));
 }
 
 function toPayload(draft: Draft, defaultCurrency: string): ScheduleCreate {
@@ -799,6 +792,23 @@ export function ScheduleForm({
               placeholder={t("scheduleForm.loan.paymentAccountPlaceholder")}
             />
           </div>
+
+          <AmortizationTable
+            loan={{
+              principal: draft.loan_draft.principal.trim() || "0",
+              annual_rate: percentToDecimal(draft.loan_draft.annual_rate),
+              term_count: Number(draft.loan_draft.term_count) || 0,
+              method:
+                draft.schedule_kind === "equal_payment"
+                  ? "equal_payment"
+                  : "equal_principal",
+            }}
+            anchorDate={draft.anchor_date}
+            intervalCount={draft.interval_count}
+            currency={defaultCurrency}
+            scheduleId={schedule?.id}
+            events={schedule?.events ?? []}
+          />
         </div>
       )}
 

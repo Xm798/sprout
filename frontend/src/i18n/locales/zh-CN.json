@@ -200,6 +200,37 @@
       "overwriteConfirm": "这将覆盖你已填写的内容，确定继续？"
     }
   },
+  "amortization": {
+    "title": "还款计划表",
+    "fillToPreview": "填写本金、利率、期数和开始日期以预览还款计划。",
+    "previewFailed": "无法生成还款计划：{{error}}",
+    "totalInterest": "总利息",
+    "payoffDate": "结清日期",
+    "seq": "期",
+    "dueDate": "日期",
+    "principal": "本金",
+    "interest": "利息",
+    "payment": "月供",
+    "balance": "剩余本金",
+    "prepaymentTag": "（提前还款）",
+    "eventKind": "操作",
+    "eventDate": "日期",
+    "prepayment": "提前还款",
+    "rateChange": "利率调整（LPR）",
+    "prepaymentAmount": "提前还款金额",
+    "prepaymentAmountPlaceholder": "例如 50000",
+    "prepaymentMode": "还款后",
+    "mode": {
+      "shorten_term": "缩短期限",
+      "reduce_payment": "减少月供"
+    },
+    "newRate": "新年利率（%）",
+    "newRatePlaceholder": "例如 4.20",
+    "addEvent": "应用",
+    "removeEvent": "删除事件",
+    "eventAddedToast": "事件已应用",
+    "eventFailedToast": "无法应用该事件"
+  },
   "settings": {
     "title": "设置",
     "subtitle": "Sprout 写入 Beancount 交易的位置和方式。",

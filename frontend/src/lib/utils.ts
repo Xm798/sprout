@@ -29,6 +29,14 @@ export function formatAmount(amount: string | number, currency?: string) {
   return currency ? `${body} ${currency}` : body;
 }
 
+// Convert percent string to decimal string, e.g. "4.85" -> "0.0485".
+// Uses toFixed(10) to avoid floating-point noise, then strips trailing zeros.
+export function percentToDecimal(pct: string): string {
+  const num = parseFloat(pct);
+  if (isNaN(num)) return "0";
+  return String(parseFloat((num / 100).toFixed(10)));
+}
+
 /** Last segment of a Beancount account, for compact display. */
 export function leafAccount(account?: string) {
   if (!account) return "—";
