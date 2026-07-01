@@ -58,9 +58,12 @@ def test_alembic_upgrade_builds_schema_on_fresh_sqlite(tmp_path, monkeypatch):
     cfg_cols = {c["name"] for c in insp.get_columns("appconfig")}
     assert "default_currency" in cfg_cols
 
-    # UniqueConstraint(schedule_id, due_date) and the schedule_id index.
+    # The loan migration widened the unique constraint to 4 columns.
     uniques = insp.get_unique_constraints("occurrence")
-    assert any(set(u["column_names"]) == {"schedule_id", "due_date"} for u in uniques)
+    assert any(
+        set(u["column_names"]) == {"schedule_id", "due_date", "loan_event", "event_id"}
+        for u in uniques
+    )
     indexes = {i["name"] for i in insp.get_indexes("occurrence")}
     assert "ix_occurrence_schedule_id" in indexes
 
@@ -99,6 +102,38 @@ def test_init_db_adopts_pre_alembic_database(tmp_path, monkeypatch):
     with legacy_engine.connect() as c:
         version = c.execute(text("select version_num from alembic_version")).scalar()
     assert version is not None
+
+
+def test_loan_migration_upgrades_legacy_row_and_adds_defaults(tmp_path, monkeypatch):
+    """A DB stamped at the pre-loan head (3410f3212aec) with a schedule row must
+    survive upgrade head with kind='fixed' and events=[] backfilled from server defaults."""
+    from alembic import command
+
+    db_file = tmp_path / "pre_loan.db"
+    monkeypatch.setenv("SPROUT_DATABASE_URL", f"sqlite:///{db_file}")
+    cfg = _alembic_config()
+
+    # Build DB at the pre-loan head and insert a legacy schedule row.
+    command.upgrade(cfg, "3410f3212aec")
+    engine = make_engine(f"sqlite:///{db_file}")
+    with engine.begin() as c:
+        c.execute(text(
+            "INSERT INTO schedule (name, payee, narration, interval_unit, interval_count,"
+            " anchor_date, tags, status, postings, created_at, updated_at)"
+            " VALUES ('rent', '', '', 'month', 1, '2025-01-01', '', 'active', '[]',"
+            " '2025-01-01 00:00:00', '2025-01-01 00:00:00')"
+        ))
+
+    # Upgrade to head (the loan-schedules migration).
+    command.upgrade(cfg, "head")
+
+    with engine.connect() as c:
+        row = c.execute(text("SELECT kind, events FROM schedule WHERE name='rent'")).fetchone()
+    assert row is not None
+    assert row[0] == "fixed"
+    # SQLite stores server_default as the raw SQL string; JSON load normalises it.
+    import json
+    assert json.loads(row[1]) == []
 
 
 def test_loan_schedule_and_occurrence_columns_roundtrip(session):
