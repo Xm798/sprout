@@ -85,7 +85,7 @@ export function InboxRow({
 
   function onSkip() {
     skip.mutate(occurrence.id, {
-      onSuccess: () => toast(t("inboxRow.skippedToast", { name })),
+      onSuccess: () => toast.success(t("inboxRow.skippedToast", { name })),
     });
   }
 

@@ -149,6 +149,8 @@ export function useMarkPaidOutside() {
     mutationFn: (id: number) => api.markPaidOutside(id),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: qk.inbox });
+      // A paid-outside occurrence enters the history list.
+      qc.invalidateQueries({ queryKey: qk.history });
       qc.invalidateQueries({ queryKey: qk.schedules });
     },
   });
