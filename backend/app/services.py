@@ -1,6 +1,5 @@
 import datetime
 import logging
-from decimal import Decimal
 from pathlib import Path
 from typing import Optional
 
@@ -58,9 +57,11 @@ def _fill(legs: list[Posting], inst) -> list[Posting]:
 def resolve_postings(sch: Schedule, occ: Occurrence) -> list[Posting]:
     if sch.kind != "loan":
         return parse_postings(sch.postings)
+    if occ.status == "confirmed":
+        if occ.frozen_postings is not None:
+            return parse_postings(occ.frozen_postings)
+        raise StaleOccurrence(f"confirmed occurrence {occ.id} has no frozen_postings")
     legs = parse_postings(sch.postings)
-    if occ.status == "confirmed" and occ.frozen_postings is not None:
-        return parse_postings(occ.frozen_postings)
     inst = _row_for(_loan_table(sch), occ)
     if inst is None:
         raise StaleOccurrence(f"occurrence {occ.id} has no amortization row")

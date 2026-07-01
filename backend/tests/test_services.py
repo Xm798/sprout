@@ -601,6 +601,23 @@ def test_resolve_postings_loan_confirmed_uses_frozen(session):
     assert legs == {"principal": "1.00", "interest": "2.00", "payment": "-3.00"}
 
 
+def test_resolve_postings_confirmed_without_frozen_raises(session):
+    from app.services import resolve_postings, StaleOccurrence
+    from app.models import Schedule, Occurrence
+    import datetime
+    sch = Schedule(name="m", kind="loan", interval_unit="month", interval_count=1,
+                   anchor_date=datetime.date(2026, 1, 1),
+                   loan={"principal": "1000000", "annual_rate": "0.0485", "term_count": 360,
+                         "method": "equal_payment"}, events=[],
+                   postings=[{"id": "p", "account": "Liabilities:Loan", "role": "principal", "currency": "CNY"},
+                             {"id": "i", "account": "Expenses:Int", "role": "interest", "currency": "CNY"},
+                             {"id": "c", "account": "Assets:Bank", "role": "payment", "currency": "CNY"}])
+    occ = Occurrence(schedule_id=1, due_date=datetime.date(2026, 1, 1), loan_seq=1,
+                     status="confirmed", frozen_postings=None)
+    with pytest.raises(StaleOccurrence, match="confirmed occurrence .* has no frozen_postings"):
+        resolve_postings(sch, occ)
+
+
 def test_materialize_honors_explicit_horizon(session, config):
     from app.models import Schedule, Occurrence
     from sqlmodel import select
