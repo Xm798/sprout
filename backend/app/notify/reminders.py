@@ -71,9 +71,13 @@ def run_due_reminders(session: Session, cfg: AppConfig, now: datetime.datetime) 
             title, body = _reminder_text(sch, occ)
             results = send_to_channels(pending, title, body)
             for name, ok in results.items():
-                if ok is True:
+                if isinstance(ok, bool):
+                    # Log any completed boolean attempt (True or False) for dedup.
+                    # String values mean the send never reached the service (e.g.
+                    # invalid URL / exception) and should be retried next tick.
                     session.add(NotificationLog(occurrence_id=occ.id, channel_name=name))
-                    sent += 1
+                    if ok is True:
+                        sent += 1
             session.commit()
         except Exception:                       # one bad occurrence never aborts the batch
             logger.exception("reminder failed for occurrence %s", occ.id)
