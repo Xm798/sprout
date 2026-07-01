@@ -143,6 +143,17 @@ export function useSkip() {
   });
 }
 
+export function useMarkPaidOutside() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => api.markPaidOutside(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: qk.inbox });
+      qc.invalidateQueries({ queryKey: qk.schedules });
+    },
+  });
+}
+
 export function useHistory() {
   return useQuery({ queryKey: qk.history, queryFn: api.getHistory });
 }

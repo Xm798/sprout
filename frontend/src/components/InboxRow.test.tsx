@@ -11,6 +11,7 @@ vi.mock("../api/client", () => ({
     previewTransient: vi.fn().mockResolvedValue({ text: "2026-06-15 * \"Spotify\"\n" }),
     confirm: vi.fn().mockResolvedValue({ id: 1, status: "confirmed" }),
     skip: vi.fn().mockResolvedValue({ id: 1, status: "skipped" }),
+    markPaidOutside: vi.fn().mockResolvedValue({ id: 2, status: "confirmed" }),
   },
 }));
 
@@ -120,4 +121,62 @@ test("amount input placeholder shows the editable leg's own amount, not the net"
   );
   await user.click(screen.getByRole("button", { name: /preview/i }));
   expect(screen.getByLabelText(/^amount/i)).toHaveAttribute("placeholder", "-10000");
+});
+
+// ── loan occurrence ───────────────────────────────────────────────────────────
+
+const loanSchedule: Schedule = {
+  id: 9,
+  name: "Mortgage",
+  payee: "Bank",
+  narration: "monthly mortgage",
+  kind: "loan",
+  postings: [
+    { id: "p",   account: "Liabilities:Mortgage",       amount: null, currency: "USD", role: "principal" },
+    { id: "i",   account: "Expenses:Mortgage:Interest", amount: null, currency: "USD", role: "interest" },
+    { id: "pay", account: "Assets:Bank:Checking",       amount: null, currency: "USD", role: "payment" },
+  ],
+  headline_amount: "536.82",
+  headline_currency: "USD",
+  interval_unit: "month",
+  interval_count: 1,
+  anchor_date: "2026-01-15",
+  end_date: null,
+  max_count: null,
+  tags: "sprout",
+  status: "active",
+  created_at: "",
+  updated_at: "",
+};
+
+const loanOccurrence: Occurrence = {
+  id: 2, schedule_id: 9, due_date: "2026-06-15", status: "pending",
+  override_amounts: {}, override_date: null, override_narration: null,
+  written_path: null, sprout_id: "sch9-20260615", confirmed_at: null,
+};
+
+test("loan InboxRow shows paid-outside button, not skip", () => {
+  renderWithProviders(<InboxRow occurrence={loanOccurrence} schedule={loanSchedule} />);
+  expect(screen.queryByRole("button", { name: /^skip$/i })).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /paid outside/i })).toBeInTheDocument();
+});
+
+test("clicking paid-outside calls the api", async () => {
+  const user = userEvent.setup();
+  renderWithProviders(<InboxRow occurrence={loanOccurrence} schedule={loanSchedule} />);
+  await user.click(screen.getByRole("button", { name: /paid outside/i }));
+  await waitFor(() => expect(api.markPaidOutside).toHaveBeenCalledWith(2));
+});
+
+test("overdue loan occurrence shows needs-attention badge", () => {
+  const overdue: Occurrence = { ...loanOccurrence, due_date: "2020-01-01" };
+  renderWithProviders(<InboxRow occurrence={overdue} schedule={loanSchedule} />);
+  expect(screen.getByText("Needs attention")).toBeInTheDocument();
+});
+
+test("non-overdue loan occurrence does not show needs-attention badge", () => {
+  // A far-future due date is never overdue.
+  const future: Occurrence = { ...loanOccurrence, due_date: "2099-12-31" };
+  renderWithProviders(<InboxRow occurrence={future} schedule={loanSchedule} />);
+  expect(screen.queryByText("Needs attention")).not.toBeInTheDocument();
 });

@@ -95,6 +95,8 @@ export const api = {
       body: JSON.stringify(body),
     }),
   skip: (id: number) => http<Occurrence>(`/inbox/${id}/skip`, { method: "POST" }),
+  markPaidOutside: (id: number) =>
+    http<Occurrence>(`/inbox/${id}/paid-outside`, { method: "POST" }),
 
   getHistory: () => http<Occurrence[]>("/history"),
   // Reconcile scan: which confirmed occurrences vanished from the ledger.

@@ -625,6 +625,26 @@ def test_add_event_rejects_on_or_before_confirmed_boundary(client):
     assert any(o["due_date"] == "2026-05-15" for o in prepay_occs)
 
 
+def test_paid_outside_loan_occurrence(client):
+    """POST paid-outside on a loan occurrence → 200, status confirmed, no ledger write."""
+    client.post("/api/schedules", json=new_loan_payload())
+    occ_id = client.get("/api/inbox").json()[0]["id"]
+    r = client.post(f"/api/inbox/{occ_id}/paid-outside")
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert data["status"] == "confirmed"
+    assert data["written_path"] is None
+
+
+def test_skip_loan_occurrence_422(client):
+    """POST skip on a loan occurrence → 422 (skip is disabled for loans)."""
+    client.post("/api/schedules", json=new_loan_payload())
+    occ_id = client.get("/api/inbox").json()[0]["id"]
+    r = client.post(f"/api/inbox/{occ_id}/skip")
+    assert r.status_code == 422, r.text
+    assert "loan" in r.json()["detail"].lower()
+
+
 def test_delete_event(client):
     sid = client.post("/api/schedules", json=new_loan_payload()).json()["id"]
 

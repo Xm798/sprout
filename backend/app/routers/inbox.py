@@ -82,3 +82,18 @@ def skip(occurrence_id: int, session: Session = Depends(get_session)) -> Occurre
         return services.skip_occurrence(session, occurrence_id)
     except LookupError as exc:
         raise HTTPException(404, str(exc))
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+
+
+@router.post("/{occurrence_id}/paid-outside", response_model=Occurrence)
+def paid_outside(occurrence_id: int, session: Session = Depends(get_session)) -> Occurrence:
+    cfg = _config(session)
+    try:
+        return services.mark_paid_outside(session, cfg, occurrence_id)
+    except LookupError as exc:
+        raise HTTPException(404, str(exc))
+    except services.ConflictError as exc:
+        raise HTTPException(409, str(exc))
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
