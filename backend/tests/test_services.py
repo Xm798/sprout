@@ -810,3 +810,131 @@ def test_materialize_creates_loan_occurrences_with_seq(session, config, today):
     occs = session.exec(select(Occurrence).where(Occurrence.schedule_id == sch.id)).all()
     assert {o.loan_seq for o in occs} >= {1, 2, 3}
     assert all(o.loan_event == "regular" for o in occs)
+
+
+# ---------------------------------------------------------------------------
+# Task 12: skip guard, mark_paid_outside, update_schedule loan pruning
+# ---------------------------------------------------------------------------
+
+def test_skip_disabled_on_loan(session, config):
+    """skip_occurrence must raise ValueError for loan occurrences; status unchanged."""
+    sch = _make_loan_schedule(session)
+    # Horizon covers the first 6 monthly installments (Jan-Jun 2026).
+    horizon = datetime.date(2026, 6, 8)
+    services.materialize_occurrences(session, config, datetime.date(2026, 1, 1), horizon=horizon)
+
+    occs = session.exec(
+        sqlmodel.select(Occurrence)
+        .where(Occurrence.schedule_id == sch.id, Occurrence.status == "pending")
+        .order_by(Occurrence.due_date)
+    ).all()
+    assert occs, "expected at least one pending loan occurrence"
+    occ = occs[0]
+
+    with pytest.raises(ValueError, match="skip is disabled for loan occurrences"):
+        services.skip_occurrence(session, occ.id)
+
+    session.refresh(occ)
+    assert occ.status == "pending", "occurrence status must remain pending after failed skip"
+
+
+def test_mark_paid_outside_freezes_without_writing(session, config):
+    """mark_paid_outside snapshots the amortized split and marks confirmed; writes no ledger entry."""
+    sch = _make_loan_schedule(session)
+    horizon = datetime.date(2026, 6, 8)
+    today = datetime.date(2026, 1, 1)
+    services.materialize_occurrences(session, config, today, horizon=horizon)
+
+    occ = session.exec(
+        sqlmodel.select(Occurrence)
+        .where(Occurrence.schedule_id == sch.id, Occurrence.status == "pending")
+        .order_by(Occurrence.due_date)
+    ).first()
+    assert occ is not None
+    occ_id = occ.id
+
+    # Capture expected amounts from resolve_postings before marking.
+    expected = {p.id: p.amount for p in services.resolve_postings(sch, occ)}
+    assert all(v is not None for v in expected.values()), "amortization must fill all amounts"
+
+    result = services.mark_paid_outside(session, config, occ_id)
+
+    assert result.status == "confirmed"
+    assert result.written_path is None
+    assert result.frozen_postings is not None
+    frozen = {p["id"]: p["amount"] for p in result.frozen_postings}
+    assert frozen == expected, "frozen_postings must match the pre-mark amortized split"
+
+    # No ledger file was created or modified — sprout.bean must not exist.
+    from pathlib import Path
+    ledger_file = Path(config.ledger_root) / "sprout.bean"
+    assert not ledger_file.exists(), "mark_paid_outside must not write any ledger transaction"
+
+
+def test_update_schedule_prunes_loan_pending_by_amortize(session, config):
+    """Shortening term_count via update_schedule deletes pending rows beyond the new payoff.
+    Confirmed rows and in-term pending rows are kept."""
+    # Build a 6-month loan; materialize all 6 installments (Jan-Jun 2026 within horizon).
+    sch = Schedule(
+        name="ShortLoan", narration="Loan installment", kind="loan",
+        loan={"principal": "60000", "annual_rate": "0.05",
+              "term_count": 6, "method": "equal_payment"},
+        postings=_loan_postings(),
+        interval_unit="month", interval_count=1,
+        anchor_date=datetime.date(2026, 1, 1),
+        events=[],
+        tags="",
+    )
+    session.add(sch)
+    session.commit()
+    session.refresh(sch)
+
+    today = datetime.date(2026, 6, 8)  # lookahead=0 → horizon=today; covers all 6 installments
+    services.materialize_occurrences(session, config, today)
+
+    occs = session.exec(
+        sqlmodel.select(Occurrence)
+        .where(Occurrence.schedule_id == sch.id)
+        .order_by(Occurrence.due_date)
+    ).all()
+    assert len(occs) == 6, f"expected 6 occurrences, got {len(occs)}"
+
+    # Mark the first occurrence confirmed via mark_paid_outside (no ledger write).
+    services.mark_paid_outside(session, config, occs[0].id)
+    confirmed_id = occs[0].id
+    confirmed_date = occs[0].due_date  # 2026-01-01
+
+    # Shorten to term_count=3; installments 4, 5, 6 are now invalid.
+    payload = ScheduleCreate(
+        name="ShortLoan", narration="Loan installment",
+        kind="loan",
+        loan={"principal": "60000", "annual_rate": "0.05",
+              "term_count": 3, "method": "equal_payment"},
+        postings=_loan_postings(),
+        interval_unit="month", interval_count=1,
+        anchor_date=datetime.date(2026, 1, 1),
+        events=[],
+        tags="",
+    )
+    services.update_schedule(session, config, sch.id, payload, today)
+
+    remaining = session.exec(
+        sqlmodel.select(Occurrence).where(Occurrence.schedule_id == sch.id)
+    ).all()
+
+    # Confirmed row must survive even though its date is within the shortened term.
+    confirmed_rows = [o for o in remaining if o.id == confirmed_id]
+    assert len(confirmed_rows) == 1, "confirmed occurrence must be kept after update"
+    assert confirmed_rows[0].status == "confirmed"
+
+    # Pending rows for installments 4, 5, 6 (Apr-Jun 2026) must be deleted.
+    # New term ends at month 3 = 2026-03-01; anything due_date > 2026-03-01 and pending must be gone.
+    pending_remaining = [o for o in remaining if o.status == "pending"]
+    assert all(
+        o.due_date <= datetime.date(2026, 3, 1) for o in pending_remaining
+    ), f"stale pending rows remain: {[str(o.due_date) for o in pending_remaining if o.due_date > datetime.date(2026, 3, 1)]}"
+
+    # Pending rows for installments 2 and 3 (Feb, Mar 2026) must still exist.
+    pending_dates = {o.due_date for o in pending_remaining}
+    assert datetime.date(2026, 2, 1) in pending_dates, "installment 2 pending must be kept"
+    assert datetime.date(2026, 3, 1) in pending_dates, "installment 3 pending must be kept"

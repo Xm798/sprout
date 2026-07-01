@@ -336,7 +336,42 @@ def skip_occurrence(session: Session, occurrence_id: int) -> Occurrence:
     occ = session.get(Occurrence, occurrence_id)
     if occ is None:
         raise LookupError(f"occurrence {occurrence_id} not found")
+    sch = session.get(Schedule, occ.schedule_id)
+    if sch is not None and sch.kind == "loan":
+        raise ValueError(
+            "skip is disabled for loan occurrences; use 'paid outside' or leave overdue"
+        )
     occ.status = "skipped"
+    session.add(occ)
+    session.commit()
+    session.refresh(occ)
+    return occ
+
+
+def mark_paid_outside(session: Session, config: AppConfig, occurrence_id: int) -> Occurrence:
+    """Mark a pending loan occurrence as confirmed without writing a ledger transaction.
+
+    Freezes the amortized split into frozen_postings so the pending tail stays
+    consistent after the out-of-band payment.
+    """
+    occ = session.get(Occurrence, occurrence_id)
+    if occ is None:
+        raise LookupError(f"occurrence {occurrence_id} not found")
+    sch = session.get(Schedule, occ.schedule_id)
+    if sch is None:
+        raise LookupError(f"schedule {occ.schedule_id} not found")
+    if sch.kind != "loan":
+        raise ValueError("mark_paid_outside is only valid for loan occurrences")
+    if occ.status != "pending":
+        raise ValueError(
+            f"occurrence {occurrence_id} is already {occ.status}; "
+            "mark_paid_outside requires a pending occurrence"
+        )
+    postings = resolve_postings(sch, occ)
+    occ.frozen_postings = dump_postings(postings)
+    occ.status = "confirmed"
+    occ.written_path = None
+    occ.confirmed_at = datetime.datetime.now()
     session.add(occ)
     session.commit()
     session.refresh(occ)
@@ -505,33 +540,48 @@ def update_schedule(
     sch.postings = dump_postings(payload.postings)
     sch.updated_at = datetime.datetime.now()
 
-    # Dates the edited rule still produces within the materialization horizon.
     horizon = _materialization_horizon(config, today)
-    valid_dates = set(compute_due_dates(
-        payload.anchor_date, payload.interval_unit, payload.interval_count,
-        horizon, payload.end_date, payload.max_count,
-    ))
 
-    unconfirmed = session.exec(
-        select(Occurrence).where(
-            Occurrence.schedule_id == schedule_id, Occurrence.status != "confirmed"
-        )
-    ).all()
-    for occ in unconfirmed:
-        # A pending the new rule no longer produces is stale — drop it.
-        # Skipped rows are explicit user decisions and stay, like confirmed ones.
-        if occ.status == "pending" and occ.due_date not in valid_dates:
-            session.delete(occ)
-            continue
-        if not occ.override_amounts:
-            continue
-        kept = {
-            pid: amt for pid, amt in occ.override_amounts.items()
-            if pid in new and new[pid] == old.get(pid)
-        }
-        if kept != dict(occ.override_amounts):
-            occ.override_amounts = kept
-            session.add(occ)
+    if sch.kind == "loan":
+        # For loans, prune pending occurrences whose amortization key no longer
+        # exists in the updated table. Confirmed and skipped rows are kept intact.
+        valid = valid_occurrence_keys(sch, horizon)
+        pending = session.exec(
+            select(Occurrence).where(
+                Occurrence.schedule_id == schedule_id, Occurrence.status == "pending"
+            )
+        ).all()
+        for occ in pending:
+            key = (occ.loan_event, occ.event_id, occ.due_date)
+            if key not in valid:
+                session.delete(occ)
+    else:
+        # Dates the edited rule still produces within the materialization horizon.
+        valid_dates = set(compute_due_dates(
+            payload.anchor_date, payload.interval_unit, payload.interval_count,
+            horizon, payload.end_date, payload.max_count,
+        ))
+
+        unconfirmed = session.exec(
+            select(Occurrence).where(
+                Occurrence.schedule_id == schedule_id, Occurrence.status != "confirmed"
+            )
+        ).all()
+        for occ in unconfirmed:
+            # A pending the new rule no longer produces is stale — drop it.
+            # Skipped rows are explicit user decisions and stay, like confirmed ones.
+            if occ.status == "pending" and occ.due_date not in valid_dates:
+                session.delete(occ)
+                continue
+            if not occ.override_amounts:
+                continue
+            kept = {
+                pid: amt for pid, amt in occ.override_amounts.items()
+                if pid in new and new[pid] == old.get(pid)
+            }
+            if kept != dict(occ.override_amounts):
+                occ.override_amounts = kept
+                session.add(occ)
 
     session.add(sch)
     session.commit()
