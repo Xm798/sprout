@@ -23,9 +23,9 @@ def test_single_two_leg():
     assert parsed.anchor_date == datetime.date(2026, 6, 15)
     assert _legs(parsed) == [
         {"account": "Expenses:Subscription", "amount": "15.00", "currency": "USD",
-         "cost": None, "price": None},
+         "cost": None, "price": None, "role": None},
         {"account": "Assets:CreditCard", "amount": None, "currency": None,
-         "cost": None, "price": None},
+         "cost": None, "price": None, "role": None},
     ]
     assert all(p.id for p in parsed.postings)
     assert parsed.warnings == []
