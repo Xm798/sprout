@@ -431,6 +431,91 @@ def test_parse_rejects_bad_input(client, text):
     assert r.json()["detail"]
 
 
+# ── loan schedule ─────────────────────────────────────────────────────────────
+
+def new_loan_payload(**over):
+    """Three-leg loan schedule payload (equal_payment, 100 000 USD @ 5 % / 360 mo)."""
+    body = {
+        "name": "Mortgage",
+        "narration": "monthly mortgage",
+        "kind": "loan",
+        "loan": {
+            "principal": "100000.00",
+            "annual_rate": "0.05",
+            "term_count": 360,
+            "method": "equal_payment",
+        },
+        "postings": [
+            {"id": "p",   "account": "Liabilities:Mortgage",        "amount": None, "currency": "USD",
+             "cost": None, "price": None, "role": "principal"},
+            {"id": "i",   "account": "Expenses:Mortgage:Interest",  "amount": None, "currency": "USD",
+             "cost": None, "price": None, "role": "interest"},
+            {"id": "pay", "account": "Assets:Bank:Checking",        "amount": None, "currency": "USD",
+             "cost": None, "price": None, "role": "payment"},
+        ],
+        "interval_unit": "month",
+        "interval_count": 1,
+        "anchor_date": "2026-01-15",
+        "tags": "sprout",
+        "status": "active",
+    }
+    body.update(over)
+    return body
+
+
+def test_create_loan_schedule_and_headline(client):
+    r = client.post("/api/schedules", json=new_loan_payload())
+    assert r.status_code == 200, r.text
+    data = r.json()
+    # Headline is the first installment's payment amount from the amortization table.
+    assert data["headline_amount"] == "536.82"
+    assert data["headline_currency"] == "USD"
+
+
+def test_reject_degenerate_loan(client):
+    # principal=100, annual_rate=0.30, 360 months equal_payment:
+    # monthly payment rounds to 2.50 which equals first-period interest — never amortizes.
+    body = new_loan_payload()
+    body["loan"] = {
+        "principal": "100",
+        "annual_rate": "0.30",
+        "term_count": 360,
+        "method": "equal_payment",
+    }
+    r = client.post("/api/schedules", json=body)
+    assert r.status_code == 422, r.text
+    assert "degenerate" in r.json()["detail"].lower()
+
+
+def test_reject_base_edit_after_confirm(client):
+    # Create a loan schedule.
+    sid = client.post("/api/schedules", json=new_loan_payload()).json()["id"]
+
+    # Trigger materialization; anchor_date=2026-01-15 so several installments
+    # are past-due by the real test date (2026-07-01+).
+    inbox = client.get("/api/inbox").json()
+    assert len(inbox) >= 1, "expected at least one pending loan occurrence"
+    occ_id = inbox[0]["id"]
+
+    # Confirm the first occurrence (writes to tmp_path/sprout.bean).
+    r = client.post(f"/api/inbox/{occ_id}/confirm", json={})
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "confirmed"
+
+    # PUT changing annual_rate → 422 (terms locked after a confirmed occurrence).
+    locked = new_loan_payload()
+    locked["loan"]["annual_rate"] = "0.06"
+    r = client.put(f"/api/schedules/{sid}", json=locked)
+    assert r.status_code == 422, r.text
+    assert "locked" in r.json()["detail"].lower()
+
+    # PUT changing only narration (no base-param change) → 200.
+    safe = new_loan_payload()
+    safe["narration"] = "updated payment description"
+    r = client.put(f"/api/schedules/{sid}", json=safe)
+    assert r.status_code == 200, r.text
+
+
 def test_exchange_rate_endpoint_returns_rate(client, monkeypatch):
     import datetime
     from decimal import Decimal

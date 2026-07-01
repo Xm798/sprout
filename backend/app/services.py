@@ -1,5 +1,6 @@
 import datetime
 import logging
+from decimal import Decimal
 from pathlib import Path
 from typing import Optional
 
@@ -10,7 +11,7 @@ from app.models import Schedule, Occurrence, ScheduleCreate
 from app.due_engine import compute_due_dates
 from app.bean_format import format_transaction, apply_beanfmt
 from app.postings import Posting, parse_postings, dump_postings, validate_postings, validate_overrides, struct_key
-from app.loan import amortize, LoanTerms, Event
+from app.loan import amortize, LoanTerms, Event, validate_terms, DegenerateLoan
 from app.ledger import (
     ConflictError,  # noqa: F401  re-exported; routers reference services.ConflictError
     find_transaction,
@@ -522,6 +523,128 @@ def unskip_occurrence(session: Session, occurrence_id: int) -> Occurrence:
     session.commit()
     session.refresh(occ)
     return occ
+
+
+def validate_loan(payload: ScheduleCreate) -> list[str]:
+    """Validate a loan-kind schedule payload. Returns a list of error strings."""
+    errors: list[str] = []
+
+    if payload.loan is None:
+        return ["kind='loan' requires a 'loan' dict with principal, annual_rate, term_count, method"]
+
+    loan = payload.loan
+
+    try:
+        principal = Decimal(str(loan.get("principal", 0)))
+        if principal <= 0:
+            errors.append("principal must be greater than zero")
+    except Exception:
+        errors.append("principal must be a valid number")
+
+    try:
+        annual_rate = Decimal(str(loan.get("annual_rate", -1)))
+        if annual_rate < 0:
+            errors.append("annual_rate must be >= 0")
+    except Exception:
+        errors.append("annual_rate must be a valid number")
+
+    try:
+        term_count = int(loan.get("term_count", 0))
+        if term_count <= 0:
+            errors.append("term_count must be > 0")
+    except Exception:
+        errors.append("term_count must be a valid integer")
+
+    method = loan.get("method", "")
+    if method not in {"equal_payment", "equal_principal"}:
+        errors.append(f"method must be 'equal_payment' or 'equal_principal', got {method!r}")
+
+    # Guard against degenerate terms (payment <= first-period interest).
+    if not errors:
+        try:
+            validate_terms(LoanTerms(
+                **loan,
+                start_date=payload.anchor_date,
+                interval_months=payload.interval_count,
+            ))
+        except DegenerateLoan as exc:
+            errors.append(f"degenerate loan: {exc}")
+        except Exception as exc:
+            errors.append(f"loan terms error: {exc}")
+
+    # Exactly one posting per role, with distinct accounts.
+    roles_required = {"principal", "interest", "payment"}
+    by_role: dict[str, list[Posting]] = {}
+    for p in payload.postings:
+        if p.role in roles_required:
+            by_role.setdefault(p.role, []).append(p)
+
+    for role in sorted(roles_required):
+        count = len(by_role.get(role, []))
+        if count == 0:
+            errors.append(f"missing posting with role={role!r}")
+        elif count > 1:
+            errors.append(f"multiple postings with role={role!r}; expected exactly one")
+
+    if not errors:
+        accounts = [by_role[r][0].account for r in roles_required]
+        if len(set(accounts)) < len(accounts):
+            errors.append("principal, interest, and payment role accounts must be distinct")
+
+    return errors
+
+
+def loan_headline(sch: Schedule) -> tuple[Optional[str], Optional[str]]:
+    """Return (amount_str, currency) for the first installment's payment leg."""
+    try:
+        terms = LoanTerms(**sch.loan, start_date=sch.anchor_date,
+                          interval_months=sch.interval_count)
+        rows = amortize(terms, [])
+        if not rows:
+            return None, None
+        postings = parse_postings(sch.postings)
+        currency = next((p.currency for p in postings if p.role == "payment"), None)
+        return str(rows[0].payment), currency
+    except Exception:
+        return None, None
+
+
+def loan_terms_locked(session: Session, schedule_id: int, payload: ScheduleCreate) -> bool:
+    """Return True if any confirmed occurrence exists AND the payload changes a loan base param.
+
+    Base params are principal, annual_rate, term_count, method (inside loan) plus
+    anchor_date, interval_unit, interval_count (timing params).
+    """
+    sch = session.get(Schedule, schedule_id)
+    if sch is None or sch.kind != "loan" or payload.kind != "loan":
+        return False
+
+    def _dec(d: Optional[dict], k: str) -> Optional[Decimal]:
+        if d is None:
+            return None
+        v = d.get(k)
+        return Decimal(str(v)) if v is not None else None
+
+    old = sch.loan or {}
+    new = payload.loan or {}
+    changed = (
+        payload.anchor_date != sch.anchor_date
+        or payload.interval_unit != sch.interval_unit
+        or payload.interval_count != sch.interval_count
+        or _dec(new, "principal") != _dec(old, "principal")
+        or _dec(new, "annual_rate") != _dec(old, "annual_rate")
+        or new.get("term_count") != old.get("term_count")
+        or new.get("method") != old.get("method")
+    )
+    if not changed:
+        return False
+
+    return session.exec(
+        select(Occurrence).where(
+            Occurrence.schedule_id == schedule_id,
+            Occurrence.status == "confirmed",
+        )
+    ).first() is not None
 
 
 def update_schedule(

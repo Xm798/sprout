@@ -21,7 +21,10 @@ class ParseRequest(BaseModel):
 
 def _read(sch: Schedule) -> ScheduleRead:
     postings = parse_postings(sch.postings)
-    amount, currency = headline(postings)
+    if sch.kind == "loan":
+        amount, currency = services.loan_headline(sch)
+    else:
+        amount, currency = headline(postings)
     base = {f: getattr(sch, f) for f in ScheduleBase.model_fields}
     return ScheduleRead(
         **base, id=sch.id, postings=postings,
@@ -31,7 +34,10 @@ def _read(sch: Schedule) -> ScheduleRead:
 
 
 def _validate_or_422(payload: ScheduleCreate, config: AppConfig) -> None:
-    errors = validate_postings(payload.postings)
+    if payload.kind == "loan":
+        errors = services.validate_loan(payload)
+    else:
+        errors = validate_postings(payload.postings)
     if errors:
         raise HTTPException(422, "; ".join(errors))
     try:
@@ -76,6 +82,8 @@ def get_one(schedule_id: int, session: Session = Depends(get_session)) -> Schedu
 def update(schedule_id: int, payload: ScheduleCreate, session: Session = Depends(get_session)) -> ScheduleRead:
     config = get_config(session)
     _validate_or_422(payload, config)
+    if services.loan_terms_locked(session, schedule_id, payload):
+        raise HTTPException(422, "loan terms are locked once an occurrence is confirmed")
     try:
         sch = services.update_schedule(
             session, config, schedule_id, payload, datetime.date.today()
