@@ -75,6 +75,25 @@ def _materialization_horizon(config: AppConfig, today: datetime.date) -> datetim
     return today + datetime.timedelta(days=config.lookahead_days)
 
 
+def valid_occurrence_keys(sch: Schedule, horizon: datetime.date) -> set[tuple]:
+    """Return set of (loan_event, event_id, due_date) keys for all valid occurrences."""
+    if sch.kind == "loan":
+        return {
+            ("prepayment" if inst.is_prepayment else "regular",
+             inst.event_id or "",
+             inst.due_date)
+            for inst in _loan_table(sch)
+            if inst.due_date <= horizon
+        }
+    return {
+        ("regular", "", d)
+        for d in compute_due_dates(
+            sch.anchor_date, sch.interval_unit, sch.interval_count,
+            horizon, sch.end_date, sch.max_count,
+        )
+    }
+
+
 def materialize_occurrences(
     session: Session, config: AppConfig, today: datetime.date,
     horizon: datetime.date | None = None,
@@ -83,23 +102,49 @@ def materialize_occurrences(
     created = 0
     schedules = session.exec(select(Schedule).where(Schedule.status == "active")).all()
     for sch in schedules:
-        dates = compute_due_dates(
-            sch.anchor_date, sch.interval_unit, sch.interval_count,
-            horizon, sch.end_date, sch.max_count,
-        )
-        for d in dates:
-            exists = session.exec(
-                select(Occurrence).where(
-                    Occurrence.schedule_id == sch.id, Occurrence.due_date == d
-                )
-            ).first()
-            if exists:
-                continue
-            session.add(Occurrence(
-                schedule_id=sch.id, due_date=d, status="pending",
-                sprout_id=f"sch{sch.id}-{d:%Y%m%d}",
-            ))
-            created += 1
+        if sch.kind == "loan":
+            for inst in _loan_table(sch):
+                if inst.due_date > horizon:
+                    continue
+                loan_event = "prepayment" if inst.is_prepayment else "regular"
+                event_id = inst.event_id or ""
+                d = inst.due_date
+                if inst.is_prepayment:
+                    sprout_id = f"sch{sch.id}-{d:%Y%m%d}-pp{event_id}"
+                else:
+                    sprout_id = f"sch{sch.id}-{d:%Y%m%d}"
+                exists = session.exec(
+                    select(Occurrence).where(Occurrence.sprout_id == sprout_id)
+                ).first()
+                if exists:
+                    continue
+                session.add(Occurrence(
+                    schedule_id=sch.id, due_date=d, status="pending",
+                    sprout_id=sprout_id,
+                    loan_seq=inst.seq,
+                    loan_event=loan_event,
+                    event_id=event_id,
+                    frozen_postings=None,
+                ))
+                created += 1
+        else:
+            dates = compute_due_dates(
+                sch.anchor_date, sch.interval_unit, sch.interval_count,
+                horizon, sch.end_date, sch.max_count,
+            )
+            for d in dates:
+                exists = session.exec(
+                    select(Occurrence).where(
+                        Occurrence.schedule_id == sch.id, Occurrence.due_date == d
+                    )
+                ).first()
+                if exists:
+                    continue
+                session.add(Occurrence(
+                    schedule_id=sch.id, due_date=d, status="pending",
+                    sprout_id=f"sch{sch.id}-{d:%Y%m%d}",
+                ))
+                created += 1
     session.commit()
     return created
 

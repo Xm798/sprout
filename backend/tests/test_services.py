@@ -718,3 +718,23 @@ def test_materialize_honors_explicit_horizon(session, config):
     after = session.exec(select(Occurrence)).all()
     assert len(after) > base
     assert datetime.date(2026, 3, 1) in {o.due_date for o in after}
+
+
+def test_materialize_creates_loan_occurrences_with_seq(session, config, today):
+    from app.services import materialize_occurrences
+    from app.models import Schedule, Occurrence
+    import datetime
+    from sqlmodel import select
+    sch = Schedule(name="m", kind="loan", interval_unit="month", interval_count=1,
+                   anchor_date=datetime.date(2026, 1, 1),
+                   loan={"principal": "120000", "annual_rate": "0.05", "term_count": 24,
+                         "method": "equal_principal"}, events=[], postings=[
+                       {"id": "p", "account": "Liabilities:L", "role": "principal", "currency": "CNY"},
+                       {"id": "i", "account": "Expenses:I", "role": "interest", "currency": "CNY"},
+                       {"id": "c", "account": "Assets:B", "role": "payment", "currency": "CNY"}])
+    session.add(sch); session.commit()
+    materialize_occurrences(session, config, datetime.date(2027, 6, 1),
+                            horizon=datetime.date(2027, 12, 31))
+    occs = session.exec(select(Occurrence).where(Occurrence.schedule_id == sch.id)).all()
+    assert {o.loan_seq for o in occs} >= {1, 2, 3}
+    assert all(o.loan_event == "regular" for o in occs)
