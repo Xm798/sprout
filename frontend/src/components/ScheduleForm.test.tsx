@@ -389,3 +389,100 @@ test("import section is hidden in edit mode", () => {
     screen.queryByRole("button", { name: /import from bean text/i })
   ).not.toBeInTheDocument();
 });
+
+// ── Loan type selector ───────────────────────────────────────────────────────
+
+test("selecting a loan type reveals loan fields and hides postings/end-date/max-count", async () => {
+  const user = userEvent.setup();
+  renderWithProviders(<ScheduleForm />);
+
+  // Fixed by default: postings, end date, max count visible; loan fields not.
+  expect(screen.getByLabelText(/account 1/i)).toBeInTheDocument();
+  expect(screen.getByLabelText(/end date/i)).toBeInTheDocument();
+  expect(screen.getByLabelText(/max occurrences/i)).toBeInTheDocument();
+  expect(screen.queryByLabelText(/^principal$/i)).not.toBeInTheDocument();
+  expect(screen.queryByLabelText(/annual rate/i)).not.toBeInTheDocument();
+
+  // Switch to equal_payment.
+  await user.click(screen.getByRole("combobox", { name: /type/i }));
+  await user.click(await screen.findByRole("option", { name: /equal payment/i }));
+
+  // Loan fields are now visible.
+  expect(screen.getByLabelText(/^principal$/i)).toBeInTheDocument();
+  expect(screen.getByLabelText(/annual rate/i)).toBeInTheDocument();
+  expect(screen.getByLabelText(/term \(months\)/i)).toBeInTheDocument();
+  expect(screen.getByLabelText(/principal account/i)).toBeInTheDocument();
+  expect(screen.getByLabelText(/interest account/i)).toBeInTheDocument();
+  expect(screen.getByLabelText(/payment account/i)).toBeInTheDocument();
+  // Postings, end date, max count are hidden.
+  expect(screen.queryByLabelText(/account 1/i)).not.toBeInTheDocument();
+  expect(screen.queryByLabelText(/end date/i)).not.toBeInTheDocument();
+  expect(screen.queryByLabelText(/max occurrences/i)).not.toBeInTheDocument();
+});
+
+test("loan equal_payment submit produces kind=loan with decimal annual_rate and role postings", async () => {
+  const user = userEvent.setup();
+  renderWithProviders(<ScheduleForm />);
+
+  await user.type(screen.getByLabelText(/^name$/i), "Home Loan");
+
+  await user.click(screen.getByRole("combobox", { name: /type/i }));
+  await user.click(await screen.findByRole("option", { name: /equal payment/i }));
+
+  await user.type(screen.getByLabelText(/^principal$/i), "1000000");
+  await user.type(screen.getByLabelText(/annual rate/i), "4.85");
+  await user.type(screen.getByLabelText(/term \(months\)/i), "240");
+  await user.type(screen.getByLabelText(/principal account/i), "Liabilities:Mortgage");
+  await user.type(screen.getByLabelText(/interest account/i), "Expenses:Interest");
+  await user.type(screen.getByLabelText(/payment account/i), "Assets:Checking");
+  await user.click(screen.getByLabelText(/starting from/i));
+  await user.click(await screen.findByRole("button", { name: /today/i }));
+
+  await user.click(screen.getByRole("button", { name: /create schedule/i }));
+
+  await waitFor(() => expect(api.createSchedule).toHaveBeenCalledTimes(1));
+  const arg = (api.createSchedule as ReturnType<typeof vi.fn>).mock.calls[0][0];
+
+  expect(arg.kind).toBe("loan");
+  expect(arg.loan).toEqual({
+    principal: "1000000",
+    annual_rate: "0.0485",
+    term_count: 240,
+    method: "equal_payment",
+  });
+  expect(arg.postings).toHaveLength(3);
+  expect(arg.postings[0]).toMatchObject({ account: "Liabilities:Mortgage", role: "principal", currency: "USD" });
+  expect(arg.postings[1]).toMatchObject({ account: "Expenses:Interest", role: "interest", currency: "USD" });
+  expect(arg.postings[2]).toMatchObject({ account: "Assets:Checking", role: "payment", currency: "USD" });
+  // Loan schedules have no terminal conditions.
+  expect(arg.end_date).toBeNull();
+  expect(arg.max_count).toBeNull();
+});
+
+test("loan equal_principal submit uses correct method", async () => {
+  const user = userEvent.setup();
+  renderWithProviders(<ScheduleForm />);
+
+  await user.type(screen.getByLabelText(/^name$/i), "Car Loan");
+
+  await user.click(screen.getByRole("combobox", { name: /type/i }));
+  await user.click(await screen.findByRole("option", { name: /equal principal/i }));
+
+  await user.type(screen.getByLabelText(/^principal$/i), "50000");
+  await user.type(screen.getByLabelText(/annual rate/i), "3.6");
+  await user.type(screen.getByLabelText(/term \(months\)/i), "60");
+  await user.type(screen.getByLabelText(/principal account/i), "Liabilities:CarLoan");
+  await user.type(screen.getByLabelText(/interest account/i), "Expenses:Interest");
+  await user.type(screen.getByLabelText(/payment account/i), "Assets:Checking");
+  await user.click(screen.getByLabelText(/starting from/i));
+  await user.click(await screen.findByRole("button", { name: /today/i }));
+
+  await user.click(screen.getByRole("button", { name: /create schedule/i }));
+
+  await waitFor(() => expect(api.createSchedule).toHaveBeenCalledTimes(1));
+  const arg = (api.createSchedule as ReturnType<typeof vi.fn>).mock.calls[0][0];
+
+  expect(arg.loan.method).toBe("equal_principal");
+  expect(arg.loan.annual_rate).toBe("0.036");
+  expect(arg.loan.term_count).toBe(60);
+});

@@ -21,6 +21,15 @@ export interface RateQuote {
   cached: boolean;
 }
 
+export type LoanMethod = "equal_payment" | "equal_principal";
+
+export interface LoanData {
+  principal: string; // decimal serialized as string
+  annual_rate: string; // decimal (not percent), e.g. "0.0485" for 4.85%
+  term_count: number;
+  method: LoanMethod;
+}
+
 export interface Posting {
   id: string; // client-generated UUID, unique within a schedule
   account: string;
@@ -28,9 +37,12 @@ export interface Posting {
   currency?: string | null; // required when amount is present
   cost?: Cost | null;
   price?: Price | null;
+  role?: "principal" | "interest" | "payment"; // loan leg role
 }
 
 export interface ScheduleCreate {
+  kind?: "fixed" | "loan";
+  loan?: LoanData | null;
   name: string; // Sprout-internal label; never written to the ledger
   payee: string; // bean payee
   narration: string;
