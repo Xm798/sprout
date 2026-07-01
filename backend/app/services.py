@@ -213,7 +213,7 @@ def build_preview(session: Session, config: AppConfig, occurrence_id: int, **tra
     sch = session.get(Schedule, occ.schedule_id)
     if sch is None:
         raise LookupError(f"schedule {occ.schedule_id} not found")
-    postings = parse_postings(sch.postings)
+    postings = resolve_postings(sch, occ)
     # Validate the MERGED overrides (stored + transient), mirroring confirm:
     # stale stored keys must error too, not just incoming ones.
     merged = _merged_overrides(occ, transient.get("override_amounts"))
@@ -241,7 +241,7 @@ def confirm_occurrence(
     # Validate before mutating — compute effective postings from the incoming
     # overrides merged over any stored ones, then check structural errors and
     # unknown keys.  Raise immediately so nothing is written or persisted.
-    postings = parse_postings(sch.postings)
+    postings = resolve_postings(sch, occ)
     merged_amounts = _merged_overrides(occ, override_amounts)
     effective = _validate_effective(postings, merged_amounts)
 
@@ -276,6 +276,8 @@ def confirm_occurrence(
         ensure_included(config, path)
     append_transaction(path, text)
 
+    if sch.kind == "loan":
+        occ.frozen_postings = dump_postings(effective)
     occ.status = "confirmed"
     occ.written_path = str(path)
     occ.confirmed_at = datetime.datetime.now()
@@ -337,7 +339,7 @@ def readd_occurrence(session: Session, config: AppConfig, occurrence_id: int) ->
     # at write time) so re-add restores into the same destination.
     tf = validate_target_file(config, sch.target_file)
 
-    postings = parse_postings(sch.postings)
+    postings = resolve_postings(sch, occ)
     effective = _validate_effective(postings, _merged_overrides(occ, None))
     text = render_formatted(occ, sch, config, effective_postings=effective)
 
@@ -419,7 +421,7 @@ def unconfirm_occurrence(session: Session, config: AppConfig, occurrence_id: int
         # Mirror update_schedule's stale-key pruning, which skips confirmed
         # rows: keys for postings that no longer exist must not follow the
         # occurrence back into the inbox.
-        current = {p.id for p in parse_postings(sch.postings)}
+        current = {p.id for p in resolve_postings(sch, occ)}
         kept = {pid: amt for pid, amt in occ.override_amounts.items() if pid in current}
         if kept != dict(occ.override_amounts):
             occ.override_amounts = kept

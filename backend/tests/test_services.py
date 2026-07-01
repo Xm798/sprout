@@ -618,6 +618,87 @@ def test_resolve_postings_confirmed_without_frozen_raises(session):
         resolve_postings(sch, occ)
 
 
+def test_confirm_snapshots_frozen_and_readd_reuses_after_event(session, tmp_ledger_config, today):
+    """Confirm a loan occurrence: frozen_postings is set to the post-override effective
+    split. After adding a prepayment event that would change re-amortization, readd must
+    reproduce the FROZEN amounts, not re-amortize."""
+    # Extend the tmp ledger with accounts used by the loan schedule
+    main = Path(tmp_ledger_config.ledger_main_file)
+    main.write_text(
+        main.read_text()
+        + "2020-01-01 open Assets:Bank\n"
+        + "2020-01-01 open Liabilities:Loan\n"
+        + "2020-01-01 open Expenses:Interest\n"
+    )
+
+    loan_postings = [
+        {"id": "p", "account": "Liabilities:Loan", "role": "principal",
+         "currency": "CNY", "amount": None, "cost": None, "price": None},
+        {"id": "i", "account": "Expenses:Interest", "role": "interest",
+         "currency": "CNY", "amount": None, "cost": None, "price": None},
+        {"id": "c", "account": "Assets:Bank", "role": "payment",
+         "currency": "CNY", "amount": None, "cost": None, "price": None},
+    ]
+    sch = Schedule(
+        name="HomeLoan", narration="Loan installment",
+        kind="loan",
+        loan={"principal": "120000", "annual_rate": "0.05",
+              "term_count": 24, "method": "equal_payment"},
+        postings=loan_postings,
+        interval_unit="month", interval_count=1,
+        anchor_date=datetime.date(2026, 1, 1),
+        events=[],
+        tags="",
+    )
+    session.add(sch)
+    session.commit()
+    session.refresh(sch)
+
+    # Materialize; anchor_date row (due_date=2026-01-01) corresponds to seq=1
+    services.materialize_occurrences(session, tmp_ledger_config, today)
+    occs = session.exec(
+        sqlmodel.select(Occurrence).where(Occurrence.schedule_id == sch.id)
+        .order_by(Occurrence.due_date)
+    ).all()
+    occ = occs[0]
+    occ.loan_seq = 1
+    occ.loan_event = "regular"
+    session.add(occ)
+    session.commit()
+    session.refresh(occ)
+
+    # Capture what amortization gives for seq=1 before confirming
+    pre_amounts = {p.id: p.amount for p in services.resolve_postings(sch, occ)}
+    assert all(v is not None for v in pre_amounts.values()), "amortization must fill all role amounts"
+
+    # Confirm
+    services.confirm_occurrence(session, tmp_ledger_config, occ.id)
+    session.refresh(occ)
+
+    # frozen_postings must be set and equal the pre-confirm amortized split
+    assert occ.frozen_postings is not None
+    frozen_amounts = {p["id"]: p["amount"] for p in occ.frozen_postings}
+    assert frozen_amounts == pre_amounts
+
+    # Add a prepayment event AFTER seq=1; if readd re-amortized, the table would differ
+    sch.events = [{"id": "ev1", "kind": "prepayment", "date": "2026-02-01",
+                   "amount": "50000", "mode": "shorten_term"}]
+    session.add(sch)
+    session.commit()
+    session.refresh(sch)
+
+    # Simulate the transaction being missing from the ledger
+    Path(occ.written_path).write_text("")
+
+    # readd must reproduce the FROZEN amounts, not re-amortize
+    services.readd_occurrence(session, tmp_ledger_config, occ.id)
+    session.refresh(occ)
+
+    written = Path(occ.written_path).read_text()
+    for amount in pre_amounts.values():
+        assert amount in written, f"Frozen amount {amount!r} missing from re-added transaction"
+
+
 def test_materialize_honors_explicit_horizon(session, config):
     from app.models import Schedule, Occurrence
     from sqlmodel import select
