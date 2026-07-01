@@ -97,19 +97,6 @@ def amortize(terms: LoanTerms, events: list[Event] | None = None) -> list[Instal
     while balance > 0 and seq <= terms.term_count and remaining > 0:
         due = _due_date(terms.start_date, seq, terms.interval_months)
 
-        # Apply events before the regular installment so rate_change takes effect
-        # on the same period; prepayments reduce the balance before the installment.
-        while ei < len(events) and events[ei].date == due and balance > 0:
-            ev = events[ei]; ei += 1
-            balance = _apply_event(ev, balance, r, rows, due)
-            if terms.method == "equal_payment":
-                payment, remaining, r = _recompute_equal_payment(ev, balance, r, payment, remaining, im)
-            else:
-                per_principal, remaining, r = _recompute_equal_principal(ev, balance, r, per_principal, remaining, im)
-
-        if balance <= 0 or remaining <= 0:
-            break
-
         interest = money(balance * r)
         if terms.method == "equal_payment":
             principal = payment - interest
@@ -124,6 +111,15 @@ def amortize(terms: LoanTerms, events: list[Event] | None = None) -> list[Instal
             payment=money(principal + interest), balance_after=balance,
         ))
         remaining -= 1
+
+        # Apply any events landing on this payment date (regular-then-event order).
+        while ei < len(events) and events[ei].date == due and balance > 0:
+            ev = events[ei]; ei += 1
+            balance = _apply_event(ev, balance, r, rows, due)
+            if terms.method == "equal_payment":
+                payment, remaining, r = _recompute_equal_payment(ev, balance, r, payment, remaining, im)
+            else:
+                per_principal, remaining, r = _recompute_equal_principal(ev, balance, r, per_principal, remaining, im)
         seq += 1
 
     return rows

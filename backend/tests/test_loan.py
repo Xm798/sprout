@@ -147,8 +147,10 @@ def test_rate_change_reprices_and_zeroes():
     assert len(regular) == 360
     assert rows[-1].balance_after == Decimal("0.00")
     before = [r for r in regular if r.due_date < date(2028, 1, 1)][-1]
-    after = [r for r in regular if r.due_date >= date(2028, 1, 1)][0]
-    assert after.payment > before.payment            # higher rate -> higher payment
+    # The reset-date row still uses the OLD rate (interest accrued over the prior month);
+    # the new rate takes effect on the NEXT period.
+    nxt = [r for r in regular if r.due_date > date(2028, 1, 1)][0]
+    assert nxt.payment > before.payment              # higher rate -> higher payment
 
 
 def test_stacked_rate_changes_zero_out():
@@ -169,3 +171,21 @@ def test_rate_change_hitting_degenerate_is_rejected():
     ev = [Event(id="r1", kind="rate_change", date=date(2027, 1, 1), annual_rate=Decimal("5.0"))]
     with pytest.raises(DegenerateLoan):
         amortize(terms, ev)
+
+
+def test_prepayment_interest_charged_on_pre_event_balance():
+    """A same-date prepayment must NOT lower the regular installment's interest."""
+    from app.loan import amortize
+    terms = LoanTerms(principal=Decimal("1000000"), annual_rate=Decimal("0.0485"),
+                      term_count=360, method="equal_payment", start_date=date(2026, 1, 1))
+    D = date(2027, 1, 1)  # 13th payment date — a real payment date
+    ev = [Event(id="p1", kind="prepayment", date=D,
+                amount=Decimal("200000"), mode="shorten_term")]
+    rows_no_event = amortize(terms)
+    rows_with_event = amortize(terms, ev)
+
+    reg_no_ev = [r for r in rows_no_event if not r.is_prepayment and r.due_date == D][0]
+    reg_with_ev = [r for r in rows_with_event if not r.is_prepayment and r.due_date == D][0]
+
+    # Interest must be identical: prepayment reduces balance AFTER the regular installment.
+    assert reg_no_ev.interest == reg_with_ev.interest
