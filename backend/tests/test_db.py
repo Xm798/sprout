@@ -1,4 +1,5 @@
 import datetime
+import json
 
 from sqlalchemy import inspect, text
 from sqlmodel import SQLModel
@@ -132,7 +133,6 @@ def test_loan_migration_upgrades_legacy_row_and_adds_defaults(tmp_path, monkeypa
     assert row is not None
     assert row[0] == "fixed"
     # SQLite stores server_default as the raw SQL string; JSON load normalises it.
-    import json
     assert json.loads(row[1]) == []
 
 

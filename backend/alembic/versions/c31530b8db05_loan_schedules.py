@@ -36,9 +36,12 @@ def upgrade() -> None:
     op.add_column("occurrence", sa.Column("loan_event", sa.String(), nullable=False, server_default="regular"))
     op.add_column("occurrence", sa.Column("event_id", sa.String(), nullable=False, server_default=""))
     op.add_column("occurrence", sa.Column("frozen_postings", sa.JSON(), nullable=True))
+    bind = op.get_bind()
+    # Postgres names the original unnamed 2-col unique "occurrence_schedule_id_due_date_key";
+    # SQLite batch mode resolves it via the naming convention as "uq_occurrence_schedule_id_due_date".
+    old_uq = "occurrence_schedule_id_due_date_key" if bind.dialect.name == "postgresql" else "uq_occurrence_schedule_id_due_date"
     with op.batch_alter_table("occurrence", schema=None, naming_convention=_NC) as batch:
-        # drop old unnamed (schedule_id, due_date) unique; recreate as 4-col one
-        batch.drop_constraint("uq_occurrence_schedule_id_due_date", type_="unique")
+        batch.drop_constraint(old_uq, type_="unique")
         batch.create_unique_constraint(
             "uq_occurrence_schedule_id_due_date_loan_event_event_id",
             ["schedule_id", "due_date", "loan_event", "event_id"],
@@ -46,9 +49,14 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    bind = op.get_bind()
+    # Recreate with the dialect-correct name so a re-upgrade can drop it by the right name.
+    # On PG: use the Postgres autoname so the upgrade's PG branch finds it again.
+    # On SQLite: use the convention name the batch path expects.
+    new_uq = "occurrence_schedule_id_due_date_key" if bind.dialect.name == "postgresql" else "uq_occurrence_schedule_id_due_date"
     with op.batch_alter_table("occurrence", schema=None, naming_convention=_NC) as batch:
         batch.drop_constraint("uq_occurrence_schedule_id_due_date_loan_event_event_id", type_="unique")
-        batch.create_unique_constraint("uq_occurrence_schedule_id_due_date", ["schedule_id", "due_date"])
+        batch.create_unique_constraint(new_uq, ["schedule_id", "due_date"])
     for col in ("frozen_postings", "event_id", "loan_event", "loan_seq"):
         op.drop_column("occurrence", col)
     for col in ("events", "loan", "kind"):
