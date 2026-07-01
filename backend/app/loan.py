@@ -3,6 +3,7 @@ from datetime import date
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Optional
 from pydantic import BaseModel
+from dateutil.relativedelta import relativedelta
 
 CENT = Decimal("0.01")
 
@@ -53,6 +54,44 @@ def equal_payment_amount(principal: Decimal, r: Decimal, n: int) -> Decimal:
         return money(principal / n)
     factor = (1 + r) ** n
     return money(principal * r * factor / (factor - 1))
+
+
+def _due_date(start: date, seq: int, interval_months: int) -> date:
+    return start + relativedelta(months=interval_months * (seq - 1))
+
+
+def amortize(terms: LoanTerms, events: list[Event] | None = None) -> list[Installment]:
+    validate_terms(terms)
+    r = monthly_rate(terms.annual_rate, terms.interval_months)
+    balance = money(terms.principal)
+    rows: list[Installment] = []
+
+    if terms.method == "equal_payment":
+        payment = equal_payment_amount(terms.principal, r, terms.term_count)
+        scheduled = lambda bal: payment                      # noqa: E731
+    else:
+        per_principal = money(terms.principal / terms.term_count)
+        scheduled = lambda bal: money(bal * r) + per_principal  # noqa: E731
+
+    seq = 1
+    while balance > 0 and seq <= terms.term_count:
+        interest = money(balance * r)
+        if terms.method == "equal_payment":
+            principal = scheduled(balance) - interest
+        else:
+            principal = per_principal
+        # Final row (fits in one payment) or hard cap: absorb the residual.
+        if balance <= principal or seq == terms.term_count:
+            principal = balance
+        principal = money(principal)
+        balance = money(balance - principal)
+        rows.append(Installment(
+            seq=seq, due_date=_due_date(terms.start_date, seq, terms.interval_months),
+            principal=principal, interest=interest, payment=money(principal + interest),
+            balance_after=balance,
+        ))
+        seq += 1
+    return rows
 
 
 def validate_terms(terms: LoanTerms) -> None:

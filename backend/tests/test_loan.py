@@ -50,3 +50,47 @@ def test_validate_terms_rejects_degenerate_equal_principal():
                     term_count=360, method="equal_principal", start_date=date(2026, 1, 1))
     with pytest.raises(DegenerateLoan):
         validate_terms(bad)
+
+
+def test_amortize_equal_payment_zeroes_and_sums():
+    from app.loan import amortize
+    terms = LoanTerms(principal=Decimal("1000000"), annual_rate=Decimal("0.0485"),
+                      term_count=360, method="equal_payment", start_date=date(2026, 1, 1))
+    rows = amortize(terms)
+    assert len(rows) == 360
+    assert rows[0].seq == 1 and rows[-1].seq == 360
+    assert rows[-1].balance_after == Decimal("0.00")
+    assert sum(r.principal for r in rows) == Decimal("1000000.00")
+    # interest declines, principal rises across the schedule
+    assert rows[0].interest > rows[-1].interest
+    assert rows[0].principal < rows[-1].principal
+
+
+def test_amortize_equal_principal_fixed_principal_declining_interest():
+    from app.loan import amortize
+    terms = LoanTerms(principal=Decimal("1200000"), annual_rate=Decimal("0.06"),
+                      term_count=240, method="equal_principal", start_date=date(2026, 1, 1))
+    rows = amortize(terms)
+    assert len(rows) == 240
+    assert rows[0].principal == rows[1].principal == Decimal("5000.00")  # 1.2M/240
+    assert rows[0].interest > rows[-1].interest
+    assert rows[-1].balance_after == Decimal("0.00")
+    assert sum(r.principal for r in rows) == Decimal("1200000.00")
+
+
+def test_amortize_realized_length_below_term_count_on_rounding_payoff():
+    # fin-rev case: cent-rounding fully amortizes before term_count
+    from app.loan import amortize
+    terms = LoanTerms(principal=Decimal("777.77"), annual_rate=Decimal("0.30"),
+                      term_count=360, method="equal_payment", start_date=date(2026, 1, 1))
+    rows = amortize(terms)
+    assert len(rows) < 360
+    assert rows[-1].balance_after == Decimal("0.00")
+
+
+def test_amortize_dates_step_monthly_from_start():
+    from app.loan import amortize
+    terms = LoanTerms(principal=Decimal("1200"), annual_rate=Decimal("0"),
+                      term_count=3, method="equal_payment", start_date=date(2026, 1, 31))
+    rows = amortize(terms)
+    assert [r.due_date for r in rows] == [date(2026, 1, 31), date(2026, 2, 28), date(2026, 3, 31)]
