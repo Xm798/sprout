@@ -133,6 +133,7 @@
     "maxCountPlaceholder": "No limit",
     "loan": {
       "principal": "Principal",
+      "principalPlaceholder": "e.g. 100000",
       "annualRate": "Annual rate (%)",
       "annualRatePlaceholder": "e.g. 4.85",
       "termCount": "Term (months)",

@@ -83,6 +83,24 @@ test("submits a new schedule with an amount leg and an auto-balance leg", async 
   ]);
 });
 
+test("fixed schedule payload includes kind='fixed'", async () => {
+  const user = userEvent.setup();
+  renderWithProviders(<ScheduleForm />);
+
+  await user.type(screen.getByLabelText(/^name$/i), "Rent");
+  await user.type(screen.getByLabelText(/account 1/i), "Expenses:Rent");
+  await user.type(screen.getByLabelText(/amount 1/i), "1200.00");
+  await user.type(screen.getByLabelText(/account 2/i), "Assets:Checking");
+  await user.click(screen.getByLabelText(/starting from/i));
+  await user.click(await screen.findByRole("button", { name: /today/i }));
+
+  await user.click(screen.getByRole("button", { name: /create schedule/i }));
+
+  await waitFor(() => expect(api.createSchedule).toHaveBeenCalledTimes(1));
+  const arg = (api.createSchedule as ReturnType<typeof vi.fn>).mock.calls[0][0];
+  expect(arg.kind).toBe("fixed");
+});
+
 test("submits null target_file when the field is left empty", async () => {
   const user = userEvent.setup();
   renderWithProviders(<ScheduleForm />);

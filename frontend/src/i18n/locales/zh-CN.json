@@ -131,6 +131,7 @@
     "maxCountPlaceholder": "不限",
     "loan": {
       "principal": "本金",
+      "principalPlaceholder": "例如 100000",
       "annualRate": "年利率（%）",
       "annualRatePlaceholder": "例如 4.85",
       "termCount": "还款期数（月）",

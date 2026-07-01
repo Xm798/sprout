@@ -279,6 +279,7 @@ function toPayload(draft: Draft, defaultCurrency: string): ScheduleCreate {
   });
   return {
     ...base,
+    kind: "fixed" as const,
     postings,
     end_date: draft.end_date,
     max_count: draft.max_count,
@@ -740,7 +741,7 @@ export function ScheduleForm({
               id="sf-loan-principal"
               aria-label={t("scheduleForm.loan.principal")}
               inputMode="decimal"
-              placeholder={t("scheduleForm.loan.annualRatePlaceholder")}
+              placeholder={t("scheduleForm.loan.principalPlaceholder")}
               value={draft.loan_draft.principal}
               onChange={(e) => setLoanField("principal", e.target.value)}
             />
