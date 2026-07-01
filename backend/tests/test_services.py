@@ -720,6 +720,78 @@ def test_materialize_honors_explicit_horizon(session, config):
     assert datetime.date(2026, 3, 1) in {o.due_date for o in after}
 
 
+def _loan_postings():
+    return [
+        {"id": "p", "account": "Liabilities:Loan", "role": "principal",
+         "currency": "CNY", "amount": None, "cost": None, "price": None},
+        {"id": "i", "account": "Expenses:Interest", "role": "interest",
+         "currency": "CNY", "amount": None, "cost": None, "price": None},
+        {"id": "c", "account": "Assets:Bank", "role": "payment",
+         "currency": "CNY", "amount": None, "cost": None, "price": None},
+    ]
+
+
+def _make_loan_schedule(session, events=None):
+    sch = Schedule(
+        name="HomeLoan", narration="Loan installment", kind="loan",
+        loan={"principal": "120000", "annual_rate": "0.05",
+              "term_count": 24, "method": "equal_payment"},
+        postings=_loan_postings(),
+        interval_unit="month", interval_count=1,
+        anchor_date=datetime.date(2026, 1, 1),
+        events=events or [],
+        tags="",
+    )
+    session.add(sch)
+    session.commit()
+    session.refresh(sch)
+    return sch
+
+
+def test_materialize_loan_prepayment_occurrence(session, config):
+    """Prepayment event on a real payment date produces an Occurrence with
+    loan_event='prepayment', event_id set, loan_seq=None, and correct sprout_id suffix."""
+    event_id = "ev1"
+    # anchor=2026-01-01 → payment dates: 2026-01-01 (seq 1), 2026-02-01 (seq 2),
+    # 2026-03-01 (seq 3), … ; prepayment lands on 2026-03-01 alongside seq 3.
+    sch = _make_loan_schedule(session, events=[
+        {"id": event_id, "kind": "prepayment", "date": "2026-03-01",
+         "amount": "10000", "mode": "shorten_term"},
+    ])
+    horizon = datetime.date(2026, 4, 1)
+    services.materialize_occurrences(session, config, datetime.date(2026, 1, 1), horizon=horizon)
+
+    occs = session.exec(
+        sqlmodel.select(Occurrence).where(Occurrence.schedule_id == sch.id)
+    ).all()
+
+    pp_occs = [o for o in occs if o.loan_event == "prepayment"]
+    assert len(pp_occs) == 1, f"expected 1 prepayment occurrence, got {len(pp_occs)}"
+    pp = pp_occs[0]
+    assert pp.event_id == event_id
+    assert pp.loan_seq is None
+    assert pp.sprout_id.endswith(f"-pp{event_id}")
+
+    reg_occs = [o for o in occs if o.loan_event == "regular"]
+    assert len(reg_occs) >= 1
+    assert all(o.loan_event == "regular" for o in reg_occs)
+
+
+def test_materialize_loan_is_idempotent(session, config):
+    """Running materialize_occurrences twice with the same horizon must not create
+    duplicate occurrences (sprout_id uniqueness guards both regular and prepayment rows)."""
+    sch = _make_loan_schedule(session, events=[
+        {"id": "ev1", "kind": "prepayment", "date": "2026-03-01",
+         "amount": "10000", "mode": "shorten_term"},
+    ])
+    horizon = datetime.date(2026, 4, 1)
+    today = datetime.date(2026, 1, 1)
+    created_first = services.materialize_occurrences(session, config, today, horizon=horizon)
+    created_second = services.materialize_occurrences(session, config, today, horizon=horizon)
+    assert created_first > 0
+    assert created_second == 0
+
+
 def test_materialize_creates_loan_occurrences_with_seq(session, config, today):
     from app.services import materialize_occurrences
     from app.models import Schedule, Occurrence

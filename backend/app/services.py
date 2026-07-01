@@ -121,7 +121,7 @@ def materialize_occurrences(
                 session.add(Occurrence(
                     schedule_id=sch.id, due_date=d, status="pending",
                     sprout_id=sprout_id,
-                    loan_seq=inst.seq,
+                    loan_seq=None if inst.is_prepayment else inst.seq,
                     loan_event=loan_event,
                     event_id=event_id,
                     frozen_postings=None,
