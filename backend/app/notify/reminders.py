@@ -1,11 +1,12 @@
 import datetime
 import logging
+from decimal import Decimal
 
 from sqlmodel import Session, select
 
 from app.config import AppConfig
 from app.models import Schedule, Occurrence, NotificationLog
-from app.services import materialize_occurrences
+from app.services import materialize_occurrences, resolve_postings
 from app.notify.channels import send_to_channels
 
 logger = logging.getLogger(__name__)
@@ -17,15 +18,27 @@ def enabled_channels(cfg: AppConfig) -> list[dict]:
             if c.get("enabled") and c.get("url") and c.get("name") and c.get("id")]
 
 
-def _headline(sch: Schedule) -> str:
-    for p in sch.postings or []:
-        if p.get("amount"):
-            return f"{p['amount']} {p.get('currency') or ''}".strip()
+def _headline(sch: Schedule, occ: Occurrence) -> str:
+    """Amount shown in the reminder. Loan postings carry roles instead of
+    static amounts, so the figure comes from the occurrence's resolved legs
+    (the payment leg is the outflow — show it as a positive number)."""
+    try:
+        legs = resolve_postings(sch, occ)
+    except Exception:                    # a stale row must not break the text
+        return ""
+    if sch.kind == "loan":
+        pay = next((p for p in legs if p.role == "payment" and p.amount), None)
+        if pay is None:
+            return ""
+        return f"{abs(Decimal(pay.amount))} {pay.currency or ''}".strip()
+    for p in legs:
+        if p.amount:
+            return f"{p.amount} {p.currency or ''}".strip()
     return ""
 
 
 def _reminder_text(sch: Schedule, occ: Occurrence) -> tuple[str, str]:
-    amount = _headline(sch)
+    amount = _headline(sch, occ)
     title = f"Payment due: {sch.name}"
     body = f"{sch.name} {('— ' + amount + ' ') if amount else ''}due {occ.due_date:%Y-%m-%d}"
     return title, body

@@ -105,3 +105,42 @@ def test_false_result_logged_and_not_retried(session, config):
     with patch("app.notify.reminders.send_to_channels") as send2:
         reminders.run_due_reminders(session, config, now)
     send2.assert_not_called()
+
+
+def test_loan_reminder_includes_installment_amount(session, config):
+    """Loan postings carry roles, not static amounts — the reminder amount must
+    come from the occurrence's amortization row, shown as a positive outflow."""
+    from app import services
+
+    config.notify_enabled = True
+    config.notify_lead_days = 3
+    config.notify_channels = [
+        {"id": "id-ios", "name": "ios", "url": "bark://h/k", "enabled": True},
+    ]
+    sch = Schedule(
+        name="HomeLoan", narration="Loan installment", kind="loan", status="active",
+        loan={"principal": "120000", "annual_rate": "0.05",
+              "term_count": 24, "method": "equal_payment"},
+        postings=[
+            {"id": "p", "account": "Liabilities:Loan", "role": "principal",
+             "currency": "CNY", "amount": None, "cost": None, "price": None},
+            {"id": "i", "account": "Expenses:Interest", "role": "interest",
+             "currency": "CNY", "amount": None, "cost": None, "price": None},
+            {"id": "c", "account": "Assets:Bank", "role": "payment",
+             "currency": "CNY", "amount": None, "cost": None, "price": None},
+        ],
+        interval_unit="month", interval_count=1,
+        anchor_date=datetime.date(2026, 1, 1), events=[], tags="",
+    )
+    session.add(sch)
+    session.commit()
+    session.refresh(sch)
+    expected = services._loan_table(sch)[0].payment    # first installment outflow
+
+    now = datetime.datetime(2025, 12, 30, 9, 0)        # 2026-01-01 within 3-day lead
+    with patch("app.notify.reminders.send_to_channels",
+               return_value={"ios": True}) as send:
+        n = reminders.run_due_reminders(session, config, now)
+    assert n == 1
+    body = send.call_args.args[2]
+    assert f"{expected} CNY" in body
