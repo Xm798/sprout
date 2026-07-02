@@ -5,3 +5,5 @@ option "operating_currency" "CNY"
 2020-01-01 open Assets:CreditCard
 2020-01-01 open Expenses:Subscription
 2020-01-01 open Expenses:Housing:Rent
+2020-01-01 open Liabilities:Mortgage
+2020-01-01 open Expenses:Mortgage:Interest

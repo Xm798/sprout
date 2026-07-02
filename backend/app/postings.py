@@ -23,6 +23,7 @@ class Posting(BaseModel):
     currency: Optional[str] = None
     cost: Optional[Cost] = None
     price: Optional[Price] = None
+    role: Optional[str] = None
 
 
 def _is_decimal(s: str) -> bool:
@@ -101,4 +102,5 @@ def struct_key(p: Posting) -> tuple:
         p.cost.model_dump() if p.cost else None,
         p.price.model_dump() if p.price else None,
         p.amount is not None,  # has-amount boolean; detects amount↔blank flip
+        p.role,
     )

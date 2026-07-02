@@ -1,9 +1,9 @@
 import { useState } from "react";
-import { Check, ChevronDown, SkipForward } from "lucide-react";
+import { Check, ChevronDown, SkipForward, Wallet } from "lucide-react";
 import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
 
-import { useConfirm, usePreview, useSkip } from "@/api/hooks";
+import { useConfirm, useMarkPaidOutside, usePreview, useSkip } from "@/api/hooks";
 import { analyzeFlow, headlineDisplay, headlineLeg } from "@/api/postings";
 import type { ConfirmBody, Occurrence, Schedule } from "@/api/types";
 import { Badge } from "@/components/ui/badge";
@@ -24,13 +24,19 @@ export function InboxRow({
   schedule?: Schedule;
 }) {
   const { t } = useTranslation();
-  const [expanded, setExpanded] = useState(false);
+  const isLoan = schedule?.kind === "loan";
+  const [expanded, setExpanded] = useState(() => isLoan);
   const [amount, setAmount] = useState("");
   const [date, setDate] = useState("");
   const [narration, setNarration] = useState("");
 
   const confirm = useConfirm();
   const skip = useSkip();
+  const markPaidOutside = useMarkPaidOutside();
+
+  // Overdue: loan occurrence pending past its due date — visual flag only.
+  const today = new Date().toISOString().slice(0, 10);
+  const isOverdue = isLoan && occurrence.status === "pending" && occurrence.due_date < today;
 
   const name = schedule?.name ?? t("common.scheduleFallback", { id: occurrence.schedule_id });
   // Headline = net flow of the auto-balance leg; edits in this row still tune
@@ -79,7 +85,17 @@ export function InboxRow({
 
   function onSkip() {
     skip.mutate(occurrence.id, {
-      onSuccess: () => toast(t("inboxRow.skippedToast", { name })),
+      onSuccess: () => toast.success(t("inboxRow.skippedToast", { name })),
+    });
+  }
+
+  function onPaidOutside() {
+    markPaidOutside.mutate(occurrence.id, {
+      onSuccess: () => toast.success(t("inboxRow.paidOutsideToast", { name })),
+      onError: (e) =>
+        toast.error(t("inboxRow.paidOutsideFailedToast", { name }), {
+          description: errorMessage(e),
+        }),
     });
   }
 
@@ -92,6 +108,9 @@ export function InboxRow({
               {name}
             </h3>
             <Badge variant="warning">{t(`common.status.${occurrence.status}`)}</Badge>
+            {isOverdue && (
+              <Badge variant="destructive">{t("inboxRow.needsAttention")}</Badge>
+            )}
           </div>
           <div className="flex min-w-0 items-center gap-1.5 text-sm text-muted-foreground">
             <FlowAccounts flow={flow} />
@@ -120,16 +139,29 @@ export function InboxRow({
           <Check className="h-4 w-4" />
           {t("inboxRow.confirm")}
         </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={onSkip}
-          disabled={skip.isPending}
-          className="flex-1 sm:flex-none"
-        >
-          <SkipForward className="h-4 w-4" />
-          {t("inboxRow.skip")}
-        </Button>
+        {isLoan ? (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={onPaidOutside}
+            disabled={markPaidOutside.isPending}
+            className="flex-1 sm:flex-none"
+          >
+            <Wallet className="h-4 w-4" />
+            {t("inboxRow.paidOutside")}
+          </Button>
+        ) : (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={onSkip}
+            disabled={skip.isPending}
+            className="flex-1 sm:flex-none"
+          >
+            <SkipForward className="h-4 w-4" />
+            {t("inboxRow.skip")}
+          </Button>
+        )}
         <Button
           size="sm"
           variant="ghost"

@@ -1,4 +1,6 @@
 import type {
+  AmortizationPreviewBody,
+  AmortizationResult,
   AppConfig,
   ConfirmBody,
   HistoryCheck,
@@ -9,6 +11,7 @@ import type {
   RateQuote,
   Schedule,
   ScheduleCreate,
+  ScheduleEventBody,
   WrittenTransaction,
 } from "./types";
 
@@ -60,6 +63,24 @@ export const api = {
       body: JSON.stringify(body),
     }),
 
+  // Stateless amortization preview: renders the schedule for a draft loan
+  // (plus any prepayment/rate-change events) without persisting anything.
+  previewAmortization: (body: AmortizationPreviewBody) =>
+    http<AmortizationResult>("/loans/amortization", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  // Append an event to a saved loan schedule; the backend reconciles and
+  // returns the updated schedule. A 422 means the date isn't a payment date
+  // strictly after the last confirmed installment.
+  addScheduleEvent: (id: number, body: ScheduleEventBody) =>
+    http<Schedule>(`/schedules/${id}/events`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  deleteScheduleEvent: (id: number, eventId: string) =>
+    http<Schedule>(`/schedules/${id}/events/${eventId}`, { method: "DELETE" }),
+
   getInbox: () => http<Occurrence[]>("/inbox"),
   // POST preview renders with transient (unsaved) overrides so the inbox can
   // reflect edited amounts live; an empty body falls back to stored state.
@@ -74,6 +95,8 @@ export const api = {
       body: JSON.stringify(body),
     }),
   skip: (id: number) => http<Occurrence>(`/inbox/${id}/skip`, { method: "POST" }),
+  markPaidOutside: (id: number) =>
+    http<Occurrence>(`/inbox/${id}/paid-outside`, { method: "POST" }),
 
   getHistory: () => http<Occurrence[]>("/history"),
   // Reconcile scan: which confirmed occurrences vanished from the ledger.

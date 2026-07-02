@@ -9,6 +9,16 @@ from sqlalchemy import inspect
 from sqlalchemy.engine import make_url
 from sqlmodel import SQLModel, Session, create_engine
 
+# Apply naming convention BEFORE any table is reflected or defined so constraint
+# names are stable and can be referenced in migrations (drop by name on Postgres;
+# resolved via convention in SQLite batch mode).
+SQLModel.metadata.naming_convention = {
+    "uq": "uq_%(table_name)s_%(column_0_N_name)s",
+    "ix": "ix_%(table_name)s_%(column_0_N_name)s",
+    "fk": "fk_%(table_name)s_%(column_0_N_name)s_%(referred_table_name)s",
+    "pk": "pk_%(table_name)s",
+}
+
 from app.config import AppConfig, config_from_env
 from app import models  # noqa: F401  ensure tables are registered
 

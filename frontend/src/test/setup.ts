@@ -28,6 +28,17 @@ if (!Element.prototype.scrollIntoView) {
   Element.prototype.scrollIntoView = vi.fn();
 }
 
+// Radix UI Select relies on pointer capture APIs not available in jsdom.
+if (!Element.prototype.hasPointerCapture) {
+  Element.prototype.hasPointerCapture = vi.fn().mockReturnValue(false);
+}
+if (!Element.prototype.setPointerCapture) {
+  Element.prototype.setPointerCapture = vi.fn();
+}
+if (!Element.prototype.releasePointerCapture) {
+  Element.prototype.releasePointerCapture = vi.fn();
+}
+
 // Tests assert English copy; pin the language regardless of host/browser env,
 // and undo any per-test language switch or storage writes.
 await i18n.changeLanguage("en");

@@ -16,6 +16,7 @@ import {
 import type {
   Cost,
   IntervalUnit,
+  LoanMethod,
   ParsedTransaction,
   Posting,
   Price,
@@ -23,6 +24,7 @@ import type {
   ScheduleCreate,
 } from "@/api/types";
 import { api } from "@/api/client";
+import { AmortizationTable } from "@/components/AmortizationTable";
 import { Button } from "@/components/ui/button";
 import { Combobox } from "@/components/ui/combobox";
 import { DatePicker } from "@/components/ui/date-picker";
@@ -35,7 +37,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { errorMessage } from "@/lib/utils";
+import { errorMessage, percentToDecimal } from "@/lib/utils";
+
+// "fixed" = current fixed-amount schedule; the two loan values map to method.
+type ScheduleKind = "fixed" | "equal_payment" | "equal_principal";
 
 // Editing shape: amounts/currencies stay plain strings while typing; an empty
 // amount marks an auto-balance leg and is serialized to null on submit.
@@ -50,10 +55,34 @@ interface DraftPosting {
   price?: Price | null;
 }
 
-type Draft = Omit<ScheduleCreate, "postings" | "target_file"> & {
-  postings: DraftPosting[];
+// Loan fields kept as plain strings while typing, converted on submit.
+interface LoanDraft {
+  principal: string;
+  annual_rate: string; // as entered percent, e.g. "4.85"
+  term_count: string; // numeric string, e.g. "240"
+  principal_account: string;
+  interest_account: string;
+  payment_account: string;
+}
+
+interface Draft {
+  name: string;
+  payee: string;
+  narration: string;
+  tags: string;
+  status: string;
+  interval_unit: IntervalUnit;
+  interval_count: number;
+  anchor_date: string;
+  end_date?: string | null;
+  max_count?: number | null;
   target_file: string;
-};
+  schedule_kind: ScheduleKind;
+  // fixed mode
+  postings: DraftPosting[];
+  // loan mode
+  loan_draft: LoanDraft;
+}
 
 function newLeg(currency = ""): DraftPosting {
   return { id: crypto.randomUUID(), account: "", amount: "", currency };
@@ -73,6 +102,17 @@ function postingToDraft(p: Posting, freshId = false): DraftPosting {
   };
 }
 
+function emptyLoanDraft(): LoanDraft {
+  return {
+    principal: "",
+    annual_rate: "",
+    term_count: "",
+    principal_account: "",
+    interest_account: "",
+    payment_account: "",
+  };
+}
+
 // Default: an amount leg + an auto-balance leg — the old "from X to Y" model.
 function emptyDraft(currency: string): Draft {
   return {
@@ -87,13 +127,37 @@ function emptyDraft(currency: string): Draft {
     tags: "sprout",
     status: "active",
     target_file: "",
+    schedule_kind: "fixed",
     postings: [newLeg(currency), newLeg("")],
+    loan_draft: emptyLoanDraft(),
   };
 }
 
 // Map a stored schedule back into the editable draft shape. Posting ids are
 // preserved so the backend can keep per-leg overrides on untouched legs.
 function scheduleToDraft(s: Schedule): Draft {
+  const isLoan = s.kind === "loan";
+  let schedule_kind: ScheduleKind = "fixed";
+  let loan_draft = emptyLoanDraft();
+
+  if (isLoan && s.loan) {
+    const method = s.loan.method;
+    schedule_kind = method === "equal_payment" ? "equal_payment" : "equal_principal";
+    // Convert stored decimal rate back to percent for display
+    const ratePercent = String(parseFloat((parseFloat(s.loan.annual_rate) * 100).toFixed(8)));
+    const principalPosting = s.postings.find((p) => p.role === "principal");
+    const interestPosting = s.postings.find((p) => p.role === "interest");
+    const paymentPosting = s.postings.find((p) => p.role === "payment");
+    loan_draft = {
+      principal: s.loan.principal,
+      annual_rate: ratePercent,
+      term_count: String(s.loan.term_count),
+      principal_account: principalPosting?.account ?? "",
+      interest_account: interestPosting?.account ?? "",
+      payment_account: paymentPosting?.account ?? "",
+    };
+  }
+
   return {
     name: s.name,
     payee: s.payee,
@@ -106,7 +170,9 @@ function scheduleToDraft(s: Schedule): Draft {
     tags: s.tags,
     status: s.status,
     target_file: s.target_file ?? "",
-    postings: s.postings.map((p) => postingToDraft(p)),
+    schedule_kind,
+    postings: isLoan ? [] : s.postings.map((p) => postingToDraft(p)),
+    loan_draft,
   };
 }
 
@@ -136,7 +202,58 @@ function priceErrorKey(
   return null;
 }
 
-function toPayload(draft: Draft): ScheduleCreate {
+function toPayload(draft: Draft, defaultCurrency: string): ScheduleCreate {
+  const base = {
+    name: draft.name,
+    payee: draft.payee,
+    narration: draft.narration,
+    interval_unit: draft.interval_unit,
+    interval_count: draft.interval_count,
+    anchor_date: draft.anchor_date,
+    tags: draft.tags,
+    status: draft.status,
+    target_file: draft.target_file.trim() || null,
+  };
+
+  if (draft.schedule_kind !== "fixed") {
+    const method: LoanMethod =
+      draft.schedule_kind === "equal_payment" ? "equal_payment" : "equal_principal";
+    const postings: Posting[] = [
+      {
+        id: crypto.randomUUID(),
+        account: draft.loan_draft.principal_account,
+        role: "principal",
+        currency: defaultCurrency,
+      },
+      {
+        id: crypto.randomUUID(),
+        account: draft.loan_draft.interest_account,
+        role: "interest",
+        currency: defaultCurrency,
+      },
+      {
+        id: crypto.randomUUID(),
+        account: draft.loan_draft.payment_account,
+        role: "payment",
+        currency: defaultCurrency,
+      },
+    ];
+    return {
+      ...base,
+      kind: "loan",
+      loan: {
+        principal: draft.loan_draft.principal,
+        annual_rate: percentToDecimal(draft.loan_draft.annual_rate),
+        term_count: Number(draft.loan_draft.term_count),
+        method,
+      },
+      postings,
+      end_date: null,
+      max_count: null,
+    };
+  }
+
+  // Fixed: existing logic
   const postings: Posting[] = draft.postings.map((p) => {
     const amount = p.amount.trim();
     const account = p.account.trim();
@@ -153,7 +270,13 @@ function toPayload(draft: Draft): ScheduleCreate {
           price: cleanPrice(p.price),
         };
   });
-  return { ...draft, target_file: draft.target_file.trim() || null, postings };
+  return {
+    ...base,
+    kind: "fixed" as const,
+    postings,
+    end_date: draft.end_date,
+    max_count: draft.max_count,
+  };
 }
 
 const UNITS: IntervalUnit[] = ["day", "week", "month", "quarter", "year"];
@@ -267,6 +390,14 @@ export function ScheduleForm({
     }));
   }
 
+  function setLoanField(key: keyof LoanDraft, value: string) {
+    touched.current = true;
+    setDraft((d) => ({
+      ...d,
+      loan_draft: { ...d.loan_draft, [key]: value } as LoanDraft,
+    }));
+  }
+
   // Functional update keyed by id: read the *current* price so an in-flight
   // fetch resolving after the user edits the same leg can't clobber it via a
   // stale captured value.
@@ -332,17 +463,20 @@ export function ScheduleForm({
 
   function submit(e: FormEvent) {
     e.preventDefault();
-    const errKey = draft.postings
-      .map((p) => priceErrorKey(p.price))
-      .find((k): k is "errorIncomplete" | "errorNotNumber" => k !== null);
-    if (errKey) {
-      setPriceError(t(`scheduleForm.price.${errKey}`));
-      return;
+    // Price validation only applies to fixed schedules.
+    if (draft.schedule_kind === "fixed") {
+      const errKey = draft.postings
+        .map((p) => priceErrorKey(p.price))
+        .find((k): k is "errorIncomplete" | "errorNotNumber" => k !== null);
+      if (errKey) {
+        setPriceError(t(`scheduleForm.price.${errKey}`));
+        return;
+      }
     }
     setPriceError(null);
     if (schedule) {
       update.mutate(
-        { id: schedule.id, body: toPayload(draft) },
+        { id: schedule.id, body: toPayload(draft, defaultCurrency) },
         {
           onSuccess: () => onSaved?.(),
           onError: (err) =>
@@ -353,7 +487,7 @@ export function ScheduleForm({
       );
       return;
     }
-    create.mutate(toPayload(draft), {
+    create.mutate(toPayload(draft, defaultCurrency), {
       onSuccess: () => {
         setDraft(emptyDraft(defaultCurrency));
         touched.current = false;
@@ -365,6 +499,8 @@ export function ScheduleForm({
         }),
     });
   }
+
+  const isLoan = draft.schedule_kind !== "fixed";
 
   return (
     <form onSubmit={submit} className="space-y-4">
@@ -432,141 +568,249 @@ export function ScheduleForm({
         />
       </div>
 
-      <div className="space-y-2">
-        <div className="flex items-center justify-between">
-          <Label>{t("scheduleForm.postings")}</Label>
-          <Button type="button" variant="ghost" size="sm" onClick={addLeg}>
-            <Plus className="h-4 w-4" />
-            {t("scheduleForm.addPosting")}
-          </Button>
-        </div>
-
-        {draft.postings.map((leg, i) => {
-          const blank = leg.amount.trim() === "";
-          return (
-            <div
-              key={leg.id}
-              className="space-y-1.5 rounded-lg border border-border/60 p-3"
-            >
-              <div className="flex items-center justify-between">
-                <Label htmlFor={`sf-account-${i}`} className="text-xs">
-                  {t("scheduleForm.postingN", { n: i + 1 })}
-                  {blank && (
-                    <span className="ml-2 font-normal text-muted-foreground">
-                      {t("scheduleForm.autoBalanceLeg")}
-                    </span>
-                  )}
-                </Label>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7 text-muted-foreground hover:text-destructive"
-                  aria-label={t("scheduleForm.removePostingN", { n: i + 1 })}
-                  disabled={draft.postings.length <= 2}
-                  onClick={() => removeLeg(leg.id)}
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-              </div>
-
-              <Combobox
-                id={`sf-account-${i}`}
-                aria-label={t("scheduleForm.accountN", { n: i + 1 })}
-                required
-                value={leg.account}
-                onChange={(v) => setLeg(leg.id, { account: v })}
-                suggestions={accountOptions}
-                placeholder={t("scheduleForm.accountPlaceholder")}
-              />
-
-              <div className="grid grid-cols-3 gap-2">
-                <Input
-                  className="col-span-2"
-                  aria-label={t("scheduleForm.amountN", { n: i + 1 })}
-                  inputMode="decimal"
-                  placeholder={t("scheduleForm.amountPlaceholder")}
-                  value={leg.amount}
-                  onChange={(e) => setLeg(leg.id, { amount: e.target.value })}
-                />
-                <Combobox
-                  aria-label={t("scheduleForm.currencyN", { n: i + 1 })}
-                  value={blank ? "" : leg.currency}
-                  onChange={(v) => setLeg(leg.id, { currency: v })}
-                  suggestions={currencyOptions}
-                  transform={(v) => v.toUpperCase()}
-                  placeholder={defaultCurrency}
-                />
-              </div>
-
-              {!blank &&
-                (leg.price || priceOpen[leg.id] ? (
-                  <div className="space-y-1.5 rounded-md bg-muted/40 p-2">
-                    <div className="grid grid-cols-[auto_1fr_1fr] items-center gap-2">
-                      <span className="font-mono text-sm text-muted-foreground">@</span>
-                      <Input
-                        aria-label={t("scheduleForm.priceN", { n: i + 1 })}
-                        inputMode="decimal"
-                        placeholder={t("scheduleForm.price.amountPlaceholder")}
-                        value={leg.price?.amount ?? ""}
-                        onChange={(e) => setPriceField(leg.id, { amount: e.target.value })}
-                      />
-                      <Combobox
-                        aria-label={t("scheduleForm.priceCurrencyN", { n: i + 1 })}
-                        value={leg.price?.currency ?? ""}
-                        onChange={(v) => setPriceField(leg.id, { currency: v })}
-                        suggestions={currencyOptions}
-                        transform={(v) => v.toUpperCase()}
-                        placeholder={t("scheduleForm.price.currencyPlaceholder")}
-                      />
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        size="sm"
-                        disabled={
-                          fetchingId === leg.id ||
-                          !leg.currency.trim() ||
-                          !(leg.price?.currency ?? "").trim()
-                        }
-                        onClick={() => fetchRate(leg)}
-                      >
-                        {fetchingId === leg.id
-                          ? t("scheduleForm.price.fetching")
-                          : t("scheduleForm.price.fetch")}
-                      </Button>
-                      {rateMeta[leg.id] && (
-                        <span className="text-xs text-muted-foreground">
-                          {rateMeta[leg.id].source} · {rateMeta[leg.id].asOf}
-                        </span>
-                      )}
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        className="ml-auto text-muted-foreground"
-                        onClick={() => clearPrice(leg)}
-                      >
-                        {t("scheduleForm.price.remove")}
-                      </Button>
-                    </div>
-                  </div>
-                ) : (
-                  <button
-                    type="button"
-                    className="text-xs text-muted-foreground hover:text-foreground"
-                    onClick={() =>
-                      setPriceOpen((o) => ({ ...o, [leg.id]: true }))
-                    }
-                  >
-                    + {t("scheduleForm.price.add")}
-                  </button>
-                ))}
-            </div>
-          );
-        })}
+      {/* Type selector */}
+      <div className="space-y-1.5">
+        <Label>{t("scheduleForm.type")}</Label>
+        <Select
+          value={draft.schedule_kind}
+          onValueChange={(v) => set("schedule_kind", v as ScheduleKind)}
+        >
+          <SelectTrigger aria-label={t("scheduleForm.type")}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="fixed">{t("scheduleForm.typeFixed")}</SelectItem>
+            <SelectItem value="equal_payment">{t("scheduleForm.typeEqualPayment")}</SelectItem>
+            <SelectItem value="equal_principal">{t("scheduleForm.typeEqualPrincipal")}</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
+
+      {/* Fixed-only: postings */}
+      {!isLoan && (
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <Label>{t("scheduleForm.postings")}</Label>
+            <Button type="button" variant="ghost" size="sm" onClick={addLeg}>
+              <Plus className="h-4 w-4" />
+              {t("scheduleForm.addPosting")}
+            </Button>
+          </div>
+
+          {draft.postings.map((leg, i) => {
+            const blank = leg.amount.trim() === "";
+            return (
+              <div
+                key={leg.id}
+                className="space-y-1.5 rounded-lg border border-border/60 p-3"
+              >
+                <div className="flex items-center justify-between">
+                  <Label htmlFor={`sf-account-${i}`} className="text-xs">
+                    {t("scheduleForm.postingN", { n: i + 1 })}
+                    {blank && (
+                      <span className="ml-2 font-normal text-muted-foreground">
+                        {t("scheduleForm.autoBalanceLeg")}
+                      </span>
+                    )}
+                  </Label>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                    aria-label={t("scheduleForm.removePostingN", { n: i + 1 })}
+                    disabled={draft.postings.length <= 2}
+                    onClick={() => removeLeg(leg.id)}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+
+                <Combobox
+                  id={`sf-account-${i}`}
+                  aria-label={t("scheduleForm.accountN", { n: i + 1 })}
+                  required
+                  value={leg.account}
+                  onChange={(v) => setLeg(leg.id, { account: v })}
+                  suggestions={accountOptions}
+                  placeholder={t("scheduleForm.accountPlaceholder")}
+                />
+
+                <div className="grid grid-cols-3 gap-2">
+                  <Input
+                    className="col-span-2"
+                    aria-label={t("scheduleForm.amountN", { n: i + 1 })}
+                    inputMode="decimal"
+                    placeholder={t("scheduleForm.amountPlaceholder")}
+                    value={leg.amount}
+                    onChange={(e) => setLeg(leg.id, { amount: e.target.value })}
+                  />
+                  <Combobox
+                    aria-label={t("scheduleForm.currencyN", { n: i + 1 })}
+                    value={blank ? "" : leg.currency}
+                    onChange={(v) => setLeg(leg.id, { currency: v })}
+                    suggestions={currencyOptions}
+                    transform={(v) => v.toUpperCase()}
+                    placeholder={defaultCurrency}
+                  />
+                </div>
+
+                {!blank &&
+                  (leg.price || priceOpen[leg.id] ? (
+                    <div className="space-y-1.5 rounded-md bg-muted/40 p-2">
+                      <div className="grid grid-cols-[auto_1fr_1fr] items-center gap-2">
+                        <span className="font-mono text-sm text-muted-foreground">@</span>
+                        <Input
+                          aria-label={t("scheduleForm.priceN", { n: i + 1 })}
+                          inputMode="decimal"
+                          placeholder={t("scheduleForm.price.amountPlaceholder")}
+                          value={leg.price?.amount ?? ""}
+                          onChange={(e) => setPriceField(leg.id, { amount: e.target.value })}
+                        />
+                        <Combobox
+                          aria-label={t("scheduleForm.priceCurrencyN", { n: i + 1 })}
+                          value={leg.price?.currency ?? ""}
+                          onChange={(v) => setPriceField(leg.id, { currency: v })}
+                          suggestions={currencyOptions}
+                          transform={(v) => v.toUpperCase()}
+                          placeholder={t("scheduleForm.price.currencyPlaceholder")}
+                        />
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          size="sm"
+                          disabled={
+                            fetchingId === leg.id ||
+                            !leg.currency.trim() ||
+                            !(leg.price?.currency ?? "").trim()
+                          }
+                          onClick={() => fetchRate(leg)}
+                        >
+                          {fetchingId === leg.id
+                            ? t("scheduleForm.price.fetching")
+                            : t("scheduleForm.price.fetch")}
+                        </Button>
+                        {rateMeta[leg.id] && (
+                          <span className="text-xs text-muted-foreground">
+                            {rateMeta[leg.id].source} · {rateMeta[leg.id].asOf}
+                          </span>
+                        )}
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="ml-auto text-muted-foreground"
+                          onClick={() => clearPrice(leg)}
+                        >
+                          {t("scheduleForm.price.remove")}
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      className="text-xs text-muted-foreground hover:text-foreground"
+                      onClick={() =>
+                        setPriceOpen((o) => ({ ...o, [leg.id]: true }))
+                      }
+                    >
+                      + {t("scheduleForm.price.add")}
+                    </button>
+                  ))}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Loan-only: principal, rate, term, account roles */}
+      {isLoan && (
+        <div className="space-y-4">
+          <div className="space-y-1.5">
+            <Label htmlFor="sf-loan-principal">{t("scheduleForm.loan.principal")}</Label>
+            <Input
+              id="sf-loan-principal"
+              aria-label={t("scheduleForm.loan.principal")}
+              inputMode="decimal"
+              placeholder={t("scheduleForm.loan.principalPlaceholder")}
+              value={draft.loan_draft.principal}
+              onChange={(e) => setLoanField("principal", e.target.value)}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="sf-loan-rate">{t("scheduleForm.loan.annualRate")}</Label>
+            <Input
+              id="sf-loan-rate"
+              aria-label={t("scheduleForm.loan.annualRate")}
+              inputMode="decimal"
+              placeholder={t("scheduleForm.loan.annualRatePlaceholder")}
+              value={draft.loan_draft.annual_rate}
+              onChange={(e) => setLoanField("annual_rate", e.target.value)}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="sf-loan-term">{t("scheduleForm.loan.termCount")}</Label>
+            <Input
+              id="sf-loan-term"
+              aria-label={t("scheduleForm.loan.termCount")}
+              type="number"
+              min={1}
+              placeholder={t("scheduleForm.loan.termCountPlaceholder")}
+              value={draft.loan_draft.term_count}
+              onChange={(e) => setLoanField("term_count", e.target.value)}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label>{t("scheduleForm.loan.principalAccount")}</Label>
+            <Combobox
+              aria-label={t("scheduleForm.loan.principalAccount")}
+              value={draft.loan_draft.principal_account}
+              onChange={(v) => setLoanField("principal_account", v)}
+              suggestions={accountOptions}
+              placeholder={t("scheduleForm.loan.principalAccountPlaceholder")}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label>{t("scheduleForm.loan.interestAccount")}</Label>
+            <Combobox
+              aria-label={t("scheduleForm.loan.interestAccount")}
+              value={draft.loan_draft.interest_account}
+              onChange={(v) => setLoanField("interest_account", v)}
+              suggestions={accountOptions}
+              placeholder={t("scheduleForm.loan.interestAccountPlaceholder")}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label>{t("scheduleForm.loan.paymentAccount")}</Label>
+            <Combobox
+              aria-label={t("scheduleForm.loan.paymentAccount")}
+              value={draft.loan_draft.payment_account}
+              onChange={(v) => setLoanField("payment_account", v)}
+              suggestions={accountOptions}
+              placeholder={t("scheduleForm.loan.paymentAccountPlaceholder")}
+            />
+          </div>
+
+          <AmortizationTable
+            loan={{
+              principal: draft.loan_draft.principal.trim() || "0",
+              annual_rate: percentToDecimal(draft.loan_draft.annual_rate),
+              term_count: Number(draft.loan_draft.term_count) || 0,
+              method:
+                draft.schedule_kind === "equal_payment"
+                  ? "equal_payment"
+                  : "equal_principal",
+            }}
+            anchorDate={draft.anchor_date}
+            intervalCount={draft.interval_count}
+            currency={defaultCurrency}
+            scheduleId={schedule?.id}
+            events={schedule?.events ?? []}
+          />
+        </div>
+      )}
 
       <div className="space-y-1.5">
         <Label htmlFor="sf-payee">{t("scheduleForm.payee")}</Label>
@@ -625,6 +869,35 @@ export function ScheduleForm({
           onChange={(v) => set("anchor_date", v)}
         />
       </div>
+
+      {/* End date and max count — fixed schedules only */}
+      {!isLoan && (
+        <>
+          <div className="space-y-1.5">
+            <Label htmlFor="sf-end-date">{t("scheduleForm.endDate")}</Label>
+            <DatePicker
+              id="sf-end-date"
+              aria-label={t("scheduleForm.endDate")}
+              value={draft.end_date ?? ""}
+              onChange={(v) => set("end_date", v || null)}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="sf-max-count">{t("scheduleForm.maxCount")}</Label>
+            <Input
+              id="sf-max-count"
+              aria-label={t("scheduleForm.maxCount")}
+              type="number"
+              min={1}
+              placeholder={t("scheduleForm.maxCountPlaceholder")}
+              value={draft.max_count ?? ""}
+              onChange={(e) =>
+                set("max_count", e.target.value === "" ? null : Number(e.target.value))
+              }
+            />
+          </div>
+        </>
+      )}
 
       <div className="space-y-1.5">
         <Label htmlFor="sf-target-file">{t("scheduleForm.targetFile")}</Label>

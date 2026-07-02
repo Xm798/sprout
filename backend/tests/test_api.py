@@ -431,6 +431,91 @@ def test_parse_rejects_bad_input(client, text):
     assert r.json()["detail"]
 
 
+# ── loan schedule ─────────────────────────────────────────────────────────────
+
+def new_loan_payload(**over):
+    """Three-leg loan schedule payload (equal_payment, 100 000 USD @ 5 % / 360 mo)."""
+    body = {
+        "name": "Mortgage",
+        "narration": "monthly mortgage",
+        "kind": "loan",
+        "loan": {
+            "principal": "100000.00",
+            "annual_rate": "0.05",
+            "term_count": 360,
+            "method": "equal_payment",
+        },
+        "postings": [
+            {"id": "p",   "account": "Liabilities:Mortgage",        "amount": None, "currency": "USD",
+             "cost": None, "price": None, "role": "principal"},
+            {"id": "i",   "account": "Expenses:Mortgage:Interest",  "amount": None, "currency": "USD",
+             "cost": None, "price": None, "role": "interest"},
+            {"id": "pay", "account": "Assets:Bank:Checking",        "amount": None, "currency": "USD",
+             "cost": None, "price": None, "role": "payment"},
+        ],
+        "interval_unit": "month",
+        "interval_count": 1,
+        "anchor_date": "2026-01-15",
+        "tags": "sprout",
+        "status": "active",
+    }
+    body.update(over)
+    return body
+
+
+def test_create_loan_schedule_and_headline(client):
+    r = client.post("/api/schedules", json=new_loan_payload())
+    assert r.status_code == 200, r.text
+    data = r.json()
+    # Headline is the first installment's payment amount from the amortization table.
+    assert data["headline_amount"] == "536.82"
+    assert data["headline_currency"] == "USD"
+
+
+def test_reject_degenerate_loan(client):
+    # principal=100, annual_rate=0.30, 360 months equal_payment:
+    # monthly payment rounds to 2.50 which equals first-period interest — never amortizes.
+    body = new_loan_payload()
+    body["loan"] = {
+        "principal": "100",
+        "annual_rate": "0.30",
+        "term_count": 360,
+        "method": "equal_payment",
+    }
+    r = client.post("/api/schedules", json=body)
+    assert r.status_code == 422, r.text
+    assert "degenerate" in r.json()["detail"].lower()
+
+
+def test_reject_base_edit_after_confirm(client):
+    # Create a loan schedule.
+    sid = client.post("/api/schedules", json=new_loan_payload()).json()["id"]
+
+    # Trigger materialization; anchor_date=2026-01-15 so several installments
+    # are past-due by the real test date (2026-07-01+).
+    inbox = client.get("/api/inbox").json()
+    assert len(inbox) >= 1, "expected at least one pending loan occurrence"
+    occ_id = inbox[0]["id"]
+
+    # Confirm the first occurrence (writes to tmp_path/sprout.bean).
+    r = client.post(f"/api/inbox/{occ_id}/confirm", json={})
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "confirmed"
+
+    # PUT changing annual_rate → 422 (terms locked after a confirmed occurrence).
+    locked = new_loan_payload()
+    locked["loan"]["annual_rate"] = "0.06"
+    r = client.put(f"/api/schedules/{sid}", json=locked)
+    assert r.status_code == 422, r.text
+    assert "locked" in r.json()["detail"].lower()
+
+    # PUT changing only narration (no base-param change) → 200.
+    safe = new_loan_payload()
+    safe["narration"] = "updated payment description"
+    r = client.put(f"/api/schedules/{sid}", json=safe)
+    assert r.status_code == 200, r.text
+
+
 def test_exchange_rate_endpoint_returns_rate(client, monkeypatch):
     import datetime
     from decimal import Decimal
@@ -460,3 +545,228 @@ def test_exchange_rate_endpoint_maps_upstream_failure_to_502(client, monkeypatch
     r = client.get("/api/exchange-rates/rate",
                    params={"base": "HKD", "quote": "CNY"})
     assert r.status_code == 502, r.text
+
+
+# ── amortization preview + event endpoints ────────────────────────────────────
+
+def test_amortization_preview_endpoint(client):
+    r = client.post("/api/loans/amortization", json={
+        "loan": {
+            "principal": "1000000",
+            "annual_rate": "0.0485",
+            "term_count": 360,
+            "method": "equal_payment",
+        },
+        "anchor_date": "2026-01-01",
+        "interval_count": 1,
+        "events": [],
+    })
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert len(body["rows"]) == 360
+    assert body["rows"][-1]["balance_after"] == "0.00"
+    assert body["total_interest"] is not None
+    assert body["payoff_date"] is not None
+    # payoff_date must equal the last row's due_date.
+    assert body["payoff_date"] == body["rows"][-1]["due_date"]
+    # Decimals must be serialized as strings, not native JSON floats.
+    assert isinstance(body["rows"][0]["principal"], str)
+    assert isinstance(body["rows"][0]["interest"], str)
+    assert isinstance(body["total_interest"], str)
+
+
+def test_add_event_rejects_on_or_before_confirmed_boundary(client):
+    # Create a 360-month loan with anchor_date 2026-01-15.
+    sid = client.post("/api/schedules", json=new_loan_payload()).json()["id"]
+
+    # GET /inbox materializes past-due occurrences (seqs 1-6 with today >= 2026-07-01).
+    inbox = client.get("/api/inbox").json()
+    assert len(inbox) >= 3, f"expected at least 3 pending loan occurrences, got {len(inbox)}"
+
+    # Confirm seq 3 (due 2026-03-15) to establish the freeze boundary.
+    seq3 = next(o for o in inbox if o.get("loan_seq") == 3)
+    r = client.post(f"/api/inbox/{seq3['id']}/confirm", json={})
+    assert r.status_code == 200, r.text  # freeze boundary is now 2026-03-15
+
+    prepayment_base = {
+        "kind": "prepayment",
+        "amount": "5000",
+        "mode": "reduce_payment",
+    }
+
+    # Exactly at the boundary → 422.
+    r = client.post(f"/api/schedules/{sid}/events",
+                    json={**prepayment_base, "date": "2026-03-15"})
+    assert r.status_code == 422, r.text
+
+    # Before the boundary → 422.
+    r = client.post(f"/api/schedules/{sid}/events",
+                    json={**prepayment_base, "date": "2026-01-15"})
+    assert r.status_code == 422, r.text
+
+    # Not a payment date at all → 422.
+    r = client.post(f"/api/schedules/{sid}/events",
+                    json={**prepayment_base, "date": "2026-05-16"})
+    assert r.status_code == 422, r.text
+
+    # Strictly after the boundary AND on a payment date (seq 5: 2026-05-15) → 200.
+    r = client.post(f"/api/schedules/{sid}/events",
+                    json={**prepayment_base, "date": "2026-05-15"})
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert len(data["events"]) == 1
+    assert data["events"][0]["date"] == "2026-05-15"
+    assert data["events"][0]["kind"] == "prepayment"
+
+    # The prepayment occurrence must materialise on the next inbox fetch.
+    inbox2 = client.get("/api/inbox").json()
+    prepay_occs = [o for o in inbox2 if o.get("loan_event") == "prepayment"]
+    assert len(prepay_occs) >= 1
+    assert any(o["due_date"] == "2026-05-15" for o in prepay_occs)
+
+
+def test_paid_outside_loan_occurrence(client):
+    """POST paid-outside on a loan occurrence → 200, status confirmed, no ledger write."""
+    client.post("/api/schedules", json=new_loan_payload())
+    occ_id = client.get("/api/inbox").json()[0]["id"]
+    r = client.post(f"/api/inbox/{occ_id}/paid-outside")
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert data["status"] == "confirmed"
+    assert data["written_path"] is None
+
+
+def test_skip_loan_occurrence_422(client):
+    """POST skip on a loan occurrence → 422 (skip is disabled for loans)."""
+    client.post("/api/schedules", json=new_loan_payload())
+    occ_id = client.get("/api/inbox").json()[0]["id"]
+    r = client.post(f"/api/inbox/{occ_id}/skip")
+    assert r.status_code == 422, r.text
+    assert "loan" in r.json()["detail"].lower()
+
+
+def test_delete_event(client):
+    sid = client.post("/api/schedules", json=new_loan_payload()).json()["id"]
+
+    # With no confirmed occurrences the freeze boundary is unconstrained; add an
+    # event on the first payment date (2026-01-15 = seq 1).
+    r = client.post(f"/api/schedules/{sid}/events", json={
+        "kind": "prepayment",
+        "date": "2026-01-15",
+        "amount": "1000",
+        "mode": "reduce_payment",
+    })
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert len(data["events"]) == 1
+    event_id = data["events"][0]["id"]
+
+    # Delete it → 200 and events list is empty.
+    r = client.delete(f"/api/schedules/{sid}/events/{event_id}")
+    assert r.status_code == 200, r.text
+    assert r.json()["events"] == []
+
+    # Second delete of the same id → 404.
+    r = client.delete(f"/api/schedules/{sid}/events/{event_id}")
+    assert r.status_code == 404, r.text
+
+
+# ── C1: delete_event freeze-boundary guard ─────────────────────────────────────
+
+def test_delete_event_frozen_boundary_422(client):
+    """DELETE an event on or before the last confirmed installment → 422; post-boundary → 200."""
+    sid = client.post("/api/schedules", json=new_loan_payload()).json()["id"]
+
+    # Add an event on seq 2 (2026-02-15) while there are no confirmed occurrences.
+    r = client.post(f"/api/schedules/{sid}/events", json={
+        "kind": "prepayment",
+        "date": "2026-02-15",
+        "amount": "5000",
+        "mode": "reduce_payment",
+    })
+    assert r.status_code == 200, r.text
+    frozen_event_id = r.json()["events"][0]["id"]
+
+    # Confirm seq 3 (2026-03-15) to establish freeze boundary = 2026-03-15.
+    inbox = client.get("/api/inbox").json()
+    seq3 = next(o for o in inbox if o.get("loan_seq") == 3)
+    assert client.post(f"/api/inbox/{seq3['id']}/confirm", json={}).status_code == 200
+
+    # DELETE event at 2026-02-15 (≤ freeze boundary 2026-03-15) → 422.
+    r = client.delete(f"/api/schedules/{sid}/events/{frozen_event_id}")
+    assert r.status_code == 422, r.text
+    detail = r.json()["detail"].lower()
+    assert any(word in detail for word in ("confirmed", "boundary", "frozen"))
+
+    # Event must still be present.
+    sch = client.get(f"/api/schedules/{sid}").json()
+    assert any(e["id"] == frozen_event_id for e in sch["events"])
+
+    # Add a post-boundary event (seq 5: 2026-05-15 > freeze boundary) and delete → 200.
+    r = client.post(f"/api/schedules/{sid}/events", json={
+        "kind": "prepayment",
+        "date": "2026-05-15",
+        "amount": "3000",
+        "mode": "reduce_payment",
+    })
+    assert r.status_code == 200, r.text
+    post_event_id = next(e["id"] for e in r.json()["events"] if e["date"] == "2026-05-15")
+
+    r = client.delete(f"/api/schedules/{sid}/events/{post_event_id}")
+    assert r.status_code == 200, r.text
+    remaining_ids = [e["id"] for e in r.json()["events"]]
+    assert post_event_id not in remaining_ids
+    assert frozen_event_id in remaining_ids  # pre-boundary event untouched
+
+
+# ── I1: degenerate event → 422, not 500 ───────────────────────────────────────
+
+def test_add_degenerate_rate_change_event_422(client):
+    """POST a rate_change event with an absurd rate → 422 (not 500); event not persisted."""
+    sid = client.post("/api/schedules", json=new_loan_payload()).json()["id"]
+
+    # annual_rate=100 → monthly rate ≈ 8.33, which makes the recomputed payment
+    # round to the same value as first-period interest, triggering DegenerateLoan.
+    r = client.post(f"/api/schedules/{sid}/events", json={
+        "kind": "rate_change",
+        "date": "2026-01-15",
+        "annual_rate": "100",
+    })
+    assert r.status_code == 422, r.text
+
+    # The bad event must not have been persisted.
+    sch = client.get(f"/api/schedules/{sid}").json()
+    assert (sch["events"] or []) == []
+
+
+# ── I2: kind flip on confirmed loan → 422 ─────────────────────────────────────
+
+def test_update_confirmed_loan_kind_flip_422(client):
+    """PUT a confirmed loan with kind='fixed' → 422 (kind flip is a locked change)."""
+    sid = client.post("/api/schedules", json=new_loan_payload()).json()["id"]
+
+    # Confirm one occurrence to establish the freeze.
+    occ_id = client.get("/api/inbox").json()[0]["id"]
+    assert client.post(f"/api/inbox/{occ_id}/confirm", json={}).status_code == 200
+
+    # PUT with kind="fixed" and valid fixed-schedule postings → 422.
+    payload = new_schedule_payload()
+    payload["kind"] = "fixed"
+    r = client.put(f"/api/schedules/{sid}", json=payload)
+    assert r.status_code == 422, r.text
+    assert "locked" in r.json()["detail"].lower()
+
+
+# ── M3: loan interval_unit must be month ──────────────────────────────────────
+
+def test_create_loan_with_non_month_interval_422(client):
+    """Creating a loan schedule with interval_unit != 'month' → 422."""
+    body = new_loan_payload()
+    body["interval_unit"] = "year"
+    r = client.post("/api/schedules", json=body)
+    assert r.status_code == 422, r.text
+    assert "month" in r.json()["detail"].lower()
+
+    body["interval_unit"] = "week"
+    r = client.post("/api/schedules", json=body)
+    assert r.status_code == 422, r.text

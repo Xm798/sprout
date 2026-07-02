@@ -1,5 +1,6 @@
 import datetime
 import logging
+from decimal import Decimal
 from pathlib import Path
 from typing import Optional
 
@@ -10,6 +11,7 @@ from app.models import Schedule, Occurrence, ScheduleCreate
 from app.due_engine import compute_due_dates
 from app.bean_format import format_transaction, apply_beanfmt
 from app.postings import Posting, parse_postings, dump_postings, validate_postings, validate_overrides, struct_key
+from app.loan import amortize, LoanTerms, Event, validate_terms, DegenerateLoan
 from app.ledger import (
     ConflictError,  # noqa: F401  re-exported; routers reference services.ConflictError
     find_transaction,
@@ -26,9 +28,89 @@ from app.writer import (
 logger = logging.getLogger(__name__)
 
 
+class StaleOccurrence(Exception):
+    """A pending loan occurrence whose amortization row no longer exists."""
+
+
+def _loan_table(sch: Schedule) -> list:
+    terms = LoanTerms(**sch.loan, start_date=sch.anchor_date,
+                      interval_months=sch.interval_count)
+    return amortize(terms, [Event(**e) for e in (sch.events or [])])
+
+
+def _row_for(table: list, occ: Occurrence):
+    if occ.loan_event == "prepayment":
+        return next((r for r in table if r.is_prepayment and r.event_id == occ.event_id), None)
+    return next((r for r in table if r.seq == occ.loan_seq), None)
+
+
+def _fill(legs: list[Posting], inst) -> list[Posting]:
+    by_role = {"principal": inst.principal, "interest": inst.interest,
+               "payment": -inst.payment}        # payment leg is the outflow
+    out = []
+    for p in legs:
+        if p.role in by_role:
+            p = p.model_copy(update={"amount": str(by_role[p.role])})
+        out.append(p)
+    return out
+
+
+def resolve_postings(sch: Schedule, occ: Occurrence) -> list[Posting]:
+    if sch.kind != "loan":
+        return parse_postings(sch.postings)
+    if occ.status == "confirmed":
+        if occ.frozen_postings is not None:
+            return parse_postings(occ.frozen_postings)
+        raise StaleOccurrence(f"confirmed occurrence {occ.id} has no frozen_postings")
+    legs = parse_postings(sch.postings)
+    inst = _row_for(_loan_table(sch), occ)
+    if inst is None:
+        raise StaleOccurrence(f"occurrence {occ.id} has no amortization row")
+    if inst.is_prepayment:
+        legs = [p for p in legs if p.role != "interest"]
+    return _fill(legs, inst)
+
+
 def _materialization_horizon(config: AppConfig, today: datetime.date) -> datetime.date:
     """How far ahead occurrences exist; materialization and pruning must agree."""
     return today + datetime.timedelta(days=config.lookahead_days)
+
+
+def valid_occurrence_keys(sch: Schedule, horizon: datetime.date) -> set[tuple]:
+    """Return set of (loan_event, event_id, due_date) keys for all valid occurrences."""
+    if sch.kind == "loan":
+        return {
+            ("prepayment" if inst.is_prepayment else "regular",
+             inst.event_id or "",
+             inst.due_date)
+            for inst in _loan_table(sch)
+            if inst.due_date <= horizon
+        }
+    return {
+        ("regular", "", d)
+        for d in compute_due_dates(
+            sch.anchor_date, sch.interval_unit, sch.interval_count,
+            horizon, sch.end_date, sch.max_count,
+        )
+    }
+
+
+def reconcile_loan_pending(session: Session, config: AppConfig, sch: Schedule, today: datetime.date) -> None:
+    """Prune stale pending occurrences for a loan schedule after its events or params change.
+
+    Does not commit — the caller is responsible for committing the session.
+    """
+    horizon = _materialization_horizon(config, today)
+    valid = valid_occurrence_keys(sch, horizon)
+    pending = session.exec(
+        select(Occurrence).where(
+            Occurrence.schedule_id == sch.id, Occurrence.status == "pending"
+        )
+    ).all()
+    for occ in pending:
+        key = (occ.loan_event, occ.event_id, occ.due_date)
+        if key not in valid:
+            session.delete(occ)
 
 
 def materialize_occurrences(
@@ -39,23 +121,49 @@ def materialize_occurrences(
     created = 0
     schedules = session.exec(select(Schedule).where(Schedule.status == "active")).all()
     for sch in schedules:
-        dates = compute_due_dates(
-            sch.anchor_date, sch.interval_unit, sch.interval_count,
-            horizon, sch.end_date, sch.max_count,
-        )
-        for d in dates:
-            exists = session.exec(
-                select(Occurrence).where(
-                    Occurrence.schedule_id == sch.id, Occurrence.due_date == d
-                )
-            ).first()
-            if exists:
-                continue
-            session.add(Occurrence(
-                schedule_id=sch.id, due_date=d, status="pending",
-                sprout_id=f"sch{sch.id}-{d:%Y%m%d}",
-            ))
-            created += 1
+        if sch.kind == "loan":
+            for inst in _loan_table(sch):
+                if inst.due_date > horizon:
+                    continue
+                loan_event = "prepayment" if inst.is_prepayment else "regular"
+                event_id = inst.event_id or ""
+                d = inst.due_date
+                if inst.is_prepayment:
+                    sprout_id = f"sch{sch.id}-{d:%Y%m%d}-pp{event_id}"
+                else:
+                    sprout_id = f"sch{sch.id}-{d:%Y%m%d}"
+                exists = session.exec(
+                    select(Occurrence).where(Occurrence.sprout_id == sprout_id)
+                ).first()
+                if exists:
+                    continue
+                session.add(Occurrence(
+                    schedule_id=sch.id, due_date=d, status="pending",
+                    sprout_id=sprout_id,
+                    loan_seq=None if inst.is_prepayment else inst.seq,
+                    loan_event=loan_event,
+                    event_id=event_id,
+                    frozen_postings=None,
+                ))
+                created += 1
+        else:
+            dates = compute_due_dates(
+                sch.anchor_date, sch.interval_unit, sch.interval_count,
+                horizon, sch.end_date, sch.max_count,
+            )
+            for d in dates:
+                exists = session.exec(
+                    select(Occurrence).where(
+                        Occurrence.schedule_id == sch.id, Occurrence.due_date == d
+                    )
+                ).first()
+                if exists:
+                    continue
+                session.add(Occurrence(
+                    schedule_id=sch.id, due_date=d, status="pending",
+                    sprout_id=f"sch{sch.id}-{d:%Y%m%d}",
+                ))
+                created += 1
     session.commit()
     return created
 
@@ -169,7 +277,7 @@ def build_preview(session: Session, config: AppConfig, occurrence_id: int, **tra
     sch = session.get(Schedule, occ.schedule_id)
     if sch is None:
         raise LookupError(f"schedule {occ.schedule_id} not found")
-    postings = parse_postings(sch.postings)
+    postings = resolve_postings(sch, occ)
     # Validate the MERGED overrides (stored + transient), mirroring confirm:
     # stale stored keys must error too, not just incoming ones.
     merged = _merged_overrides(occ, transient.get("override_amounts"))
@@ -197,7 +305,7 @@ def confirm_occurrence(
     # Validate before mutating — compute effective postings from the incoming
     # overrides merged over any stored ones, then check structural errors and
     # unknown keys.  Raise immediately so nothing is written or persisted.
-    postings = parse_postings(sch.postings)
+    postings = resolve_postings(sch, occ)
     merged_amounts = _merged_overrides(occ, override_amounts)
     effective = _validate_effective(postings, merged_amounts)
 
@@ -232,6 +340,8 @@ def confirm_occurrence(
         ensure_included(config, path)
     append_transaction(path, text)
 
+    if sch.kind == "loan":
+        occ.frozen_postings = dump_postings(effective)
     occ.status = "confirmed"
     occ.written_path = str(path)
     occ.confirmed_at = datetime.datetime.now()
@@ -245,7 +355,42 @@ def skip_occurrence(session: Session, occurrence_id: int) -> Occurrence:
     occ = session.get(Occurrence, occurrence_id)
     if occ is None:
         raise LookupError(f"occurrence {occurrence_id} not found")
+    sch = session.get(Schedule, occ.schedule_id)
+    if sch is not None and sch.kind == "loan":
+        raise ValueError(
+            "skip is disabled for loan occurrences; use 'paid outside' or leave overdue"
+        )
     occ.status = "skipped"
+    session.add(occ)
+    session.commit()
+    session.refresh(occ)
+    return occ
+
+
+def mark_paid_outside(session: Session, config: AppConfig, occurrence_id: int) -> Occurrence:
+    """Mark a pending loan occurrence as confirmed without writing a ledger transaction.
+
+    Freezes the amortized split into frozen_postings so the pending tail stays
+    consistent after the out-of-band payment.
+    """
+    occ = session.get(Occurrence, occurrence_id)
+    if occ is None:
+        raise LookupError(f"occurrence {occurrence_id} not found")
+    sch = session.get(Schedule, occ.schedule_id)
+    if sch is None:
+        raise LookupError(f"schedule {occ.schedule_id} not found")
+    if sch.kind != "loan":
+        raise ValueError("mark_paid_outside is only valid for loan occurrences")
+    if occ.status != "pending":
+        raise ValueError(
+            f"occurrence {occurrence_id} is already {occ.status}; "
+            "mark_paid_outside requires a pending occurrence"
+        )
+    postings = resolve_postings(sch, occ)
+    occ.frozen_postings = dump_postings(postings)
+    occ.status = "confirmed"
+    occ.written_path = None
+    occ.confirmed_at = datetime.datetime.now()
     session.add(occ)
     session.commit()
     session.refresh(occ)
@@ -293,7 +438,7 @@ def readd_occurrence(session: Session, config: AppConfig, occurrence_id: int) ->
     # at write time) so re-add restores into the same destination.
     tf = validate_target_file(config, sch.target_file)
 
-    postings = parse_postings(sch.postings)
+    postings = resolve_postings(sch, occ)
     effective = _validate_effective(postings, _merged_overrides(occ, None))
     text = render_formatted(occ, sch, config, effective_postings=effective)
 
@@ -375,7 +520,7 @@ def unconfirm_occurrence(session: Session, config: AppConfig, occurrence_id: int
         # Mirror update_schedule's stale-key pruning, which skips confirmed
         # rows: keys for postings that no longer exist must not follow the
         # occurrence back into the inbox.
-        current = {p.id for p in parse_postings(sch.postings)}
+        current = {p.id for p in resolve_postings(sch, occ)}
         kept = {pid: amt for pid, amt in occ.override_amounts.items() if pid in current}
         if kept != dict(occ.override_amounts):
             occ.override_amounts = kept
@@ -398,6 +543,136 @@ def unskip_occurrence(session: Session, occurrence_id: int) -> Occurrence:
     return occ
 
 
+def validate_loan(payload: ScheduleCreate) -> list[str]:
+    """Validate a loan-kind schedule payload. Returns a list of error strings."""
+    errors: list[str] = []
+
+    if payload.loan is None:
+        return ["kind='loan' requires a 'loan' dict with principal, annual_rate, term_count, method"]
+
+    if payload.interval_unit != "month":
+        errors.append("loan schedules must use interval_unit='month'")
+
+    loan = payload.loan
+
+    try:
+        principal = Decimal(str(loan.get("principal", 0)))
+        if principal <= 0:
+            errors.append("principal must be greater than zero")
+    except Exception:
+        errors.append("principal must be a valid number")
+
+    try:
+        annual_rate = Decimal(str(loan.get("annual_rate", -1)))
+        if annual_rate < 0:
+            errors.append("annual_rate must be >= 0")
+    except Exception:
+        errors.append("annual_rate must be a valid number")
+
+    try:
+        term_count = int(loan.get("term_count", 0))
+        if term_count <= 0:
+            errors.append("term_count must be > 0")
+    except Exception:
+        errors.append("term_count must be a valid integer")
+
+    method = loan.get("method", "")
+    if method not in {"equal_payment", "equal_principal"}:
+        errors.append(f"method must be 'equal_payment' or 'equal_principal', got {method!r}")
+
+    # Guard against degenerate terms (payment <= first-period interest).
+    if not errors:
+        try:
+            validate_terms(LoanTerms(
+                **loan,
+                start_date=payload.anchor_date,
+                interval_months=payload.interval_count,
+            ))
+        except DegenerateLoan as exc:
+            errors.append(f"degenerate loan: {exc}")
+        except Exception as exc:
+            errors.append(f"loan terms error: {exc}")
+
+    # Exactly one posting per role, with distinct accounts.
+    roles_required = {"principal", "interest", "payment"}
+    by_role: dict[str, list[Posting]] = {}
+    for p in payload.postings:
+        if p.role in roles_required:
+            by_role.setdefault(p.role, []).append(p)
+
+    for role in sorted(roles_required):
+        count = len(by_role.get(role, []))
+        if count == 0:
+            errors.append(f"missing posting with role={role!r}")
+        elif count > 1:
+            errors.append(f"multiple postings with role={role!r}; expected exactly one")
+
+    if not errors:
+        accounts = [by_role[r][0].account for r in roles_required]
+        if len(set(accounts)) < len(accounts):
+            errors.append("principal, interest, and payment role accounts must be distinct")
+
+    return errors
+
+
+def loan_headline(sch: Schedule) -> tuple[Optional[str], Optional[str]]:
+    """Return (amount_str, currency) for the first installment's payment leg."""
+    try:
+        terms = LoanTerms(**sch.loan, start_date=sch.anchor_date,
+                          interval_months=sch.interval_count)
+        rows = amortize(terms, [])
+        if not rows:
+            return None, None
+        postings = parse_postings(sch.postings)
+        currency = next((p.currency for p in postings if p.role == "payment"), None)
+        return str(rows[0].payment), currency
+    except Exception:
+        return None, None
+
+
+def loan_terms_locked(session: Session, schedule_id: int, payload: ScheduleCreate) -> bool:
+    """Return True if any confirmed occurrence exists AND the payload changes a loan base param.
+
+    Base params are principal, annual_rate, term_count, method (inside loan) plus
+    anchor_date, interval_unit, interval_count (timing params). A kind flip
+    (loan → anything else) is also treated as a locked change.
+    """
+    sch = session.get(Schedule, schedule_id)
+    if sch is None or sch.kind != "loan":
+        return False
+
+    def _dec(d: Optional[dict], k: str) -> Optional[Decimal]:
+        if d is None:
+            return None
+        v = d.get(k)
+        return Decimal(str(v)) if v is not None else None
+
+    if payload.kind != "loan":
+        # Kind flip on a confirmed loan is always a locked change.
+        changed = True
+    else:
+        old = sch.loan or {}
+        new = payload.loan or {}
+        changed = (
+            payload.anchor_date != sch.anchor_date
+            or payload.interval_unit != sch.interval_unit
+            or payload.interval_count != sch.interval_count
+            or _dec(new, "principal") != _dec(old, "principal")
+            or _dec(new, "annual_rate") != _dec(old, "annual_rate")
+            or new.get("term_count") != old.get("term_count")
+            or new.get("method") != old.get("method")
+        )
+    if not changed:
+        return False
+
+    return session.exec(
+        select(Occurrence).where(
+            Occurrence.schedule_id == schedule_id,
+            Occurrence.status == "confirmed",
+        )
+    ).first() is not None
+
+
 def update_schedule(
     session: Session, config: AppConfig, schedule_id: int,
     payload: ScheduleCreate, today: datetime.date,
@@ -414,33 +689,39 @@ def update_schedule(
     sch.postings = dump_postings(payload.postings)
     sch.updated_at = datetime.datetime.now()
 
-    # Dates the edited rule still produces within the materialization horizon.
     horizon = _materialization_horizon(config, today)
-    valid_dates = set(compute_due_dates(
-        payload.anchor_date, payload.interval_unit, payload.interval_count,
-        horizon, payload.end_date, payload.max_count,
-    ))
 
-    unconfirmed = session.exec(
-        select(Occurrence).where(
-            Occurrence.schedule_id == schedule_id, Occurrence.status != "confirmed"
-        )
-    ).all()
-    for occ in unconfirmed:
-        # A pending the new rule no longer produces is stale — drop it.
-        # Skipped rows are explicit user decisions and stay, like confirmed ones.
-        if occ.status == "pending" and occ.due_date not in valid_dates:
-            session.delete(occ)
-            continue
-        if not occ.override_amounts:
-            continue
-        kept = {
-            pid: amt for pid, amt in occ.override_amounts.items()
-            if pid in new and new[pid] == old.get(pid)
-        }
-        if kept != dict(occ.override_amounts):
-            occ.override_amounts = kept
-            session.add(occ)
+    if sch.kind == "loan":
+        # Prune pending occurrences whose amortization key no longer exists in the
+        # updated table. Confirmed and skipped rows are kept intact.
+        reconcile_loan_pending(session, config, sch, today)
+    else:
+        # Dates the edited rule still produces within the materialization horizon.
+        valid_dates = set(compute_due_dates(
+            payload.anchor_date, payload.interval_unit, payload.interval_count,
+            horizon, payload.end_date, payload.max_count,
+        ))
+
+        unconfirmed = session.exec(
+            select(Occurrence).where(
+                Occurrence.schedule_id == schedule_id, Occurrence.status != "confirmed"
+            )
+        ).all()
+        for occ in unconfirmed:
+            # A pending the new rule no longer produces is stale — drop it.
+            # Skipped rows are explicit user decisions and stay, like confirmed ones.
+            if occ.status == "pending" and occ.due_date not in valid_dates:
+                session.delete(occ)
+                continue
+            if not occ.override_amounts:
+                continue
+            kept = {
+                pid: amt for pid, amt in occ.override_amounts.items()
+                if pid in new and new[pid] == old.get(pid)
+            }
+            if kept != dict(occ.override_amounts):
+                occ.override_amounts = kept
+                session.add(occ)
 
     session.add(sch)
     session.commit()

@@ -13,9 +13,9 @@ def _amount_leg(**kw):
 def test_parse_and_dump_roundtrip():
     raw = [
         {"id": "p1", "account": "Expenses:Food", "amount": "15.00", "currency": "USD",
-         "cost": None, "price": None},
+         "cost": None, "price": None, "role": None},
         {"id": "p2", "account": "Assets:Cash", "amount": None, "currency": None,
-         "cost": None, "price": None},
+         "cost": None, "price": None, "role": None},
     ]
     postings = parse_postings(raw)
     assert postings[0].amount == "15.00"
@@ -144,3 +144,11 @@ def test_struct_key_stable_under_amount_value_change():
     a = _amount_leg(amount="15.00")
     b = _amount_leg(amount="99.00")
     assert struct_key(a) == struct_key(b)
+
+
+def test_role_field_and_struct_key_tracks_role():
+    from app.postings import Posting, struct_key
+    a = Posting(id="x", account="Liabilities:Loan", amount="100", currency="CNY", role="principal")
+    b = Posting(id="x", account="Liabilities:Loan", amount="100", currency="CNY", role="interest")
+    assert a.role == "principal"
+    assert struct_key(a) != struct_key(b)      # role flip invalidates an override

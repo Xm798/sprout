@@ -30,17 +30,32 @@ class Schedule(ScheduleBase, table=True):
         default_factory=list,
         sa_column=Column(MutableList.as_mutable(JSON), nullable=False),
     )
+    kind: str = "fixed"  # fixed | loan
+    loan: Optional[dict] = Field(
+        default=None,
+        sa_column=Column(MutableDict.as_mutable(JSON), nullable=True),
+    )
+    events: list[dict] = Field(
+        default_factory=list,
+        sa_column=Column(MutableList.as_mutable(JSON), nullable=False),
+    )
     created_at: datetime.datetime = Field(default_factory=datetime.datetime.now)
     updated_at: datetime.datetime = Field(default_factory=datetime.datetime.now)
 
 
 class ScheduleCreate(ScheduleBase):
     postings: list[Posting]
+    kind: str = "fixed"
+    loan: Optional[dict] = None
+    events: list[dict] = Field(default_factory=list)
 
 
 class ScheduleRead(ScheduleBase):
     id: int
     postings: list[Posting]
+    kind: str = "fixed"
+    loan: Optional[dict] = None
+    events: list[dict] = Field(default_factory=list)
     headline_amount: Optional[str] = None
     headline_currency: Optional[str] = None
     created_at: datetime.datetime
@@ -67,7 +82,7 @@ class RateCacheEntry(SQLModel, table=True):
 
 
 class Occurrence(SQLModel, table=True):
-    __table_args__ = (UniqueConstraint("schedule_id", "due_date"),)
+    __table_args__ = (UniqueConstraint("schedule_id", "due_date", "loan_event", "event_id"),)
 
     id: Optional[int] = Field(default=None, primary_key=True)
     schedule_id: int = Field(foreign_key="schedule.id", index=True)
@@ -83,3 +98,10 @@ class Occurrence(SQLModel, table=True):
     written_path: Optional[str] = None
     sprout_id: Optional[str] = None
     confirmed_at: Optional[datetime.datetime] = None
+    loan_seq: Optional[int] = None
+    loan_event: str = "regular"  # non-null sentinel; part of widened unique constraint
+    event_id: str = ""           # non-null sentinel; part of widened unique constraint
+    frozen_postings: Optional[list] = Field(
+        default=None,
+        sa_column=Column(MutableList.as_mutable(JSON), nullable=True),
+    )
