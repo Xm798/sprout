@@ -107,3 +107,22 @@ class Occurrence(SQLModel, table=True):
         default=None,
         sa_column=Column(MutableList.as_mutable(JSON), nullable=True),
     )
+
+
+class OccurrenceRead(SQLModel):
+    """API-facing view of an occurrence. Excludes frozen_postings (an internal
+    posting snapshot) while exposing the loan fields the frontend consumes."""
+
+    id: int
+    schedule_id: int
+    due_date: datetime.date
+    status: str
+    override_amounts: dict[str, str] = Field(default_factory=dict)
+    override_date: Optional[datetime.date] = None
+    override_narration: Optional[str] = None
+    written_path: Optional[str] = None
+    sprout_id: Optional[str] = None
+    confirmed_at: Optional[datetime.datetime] = None
+    loan_seq: Optional[int] = None
+    loan_event: str = "regular"
+    event_id: str = ""

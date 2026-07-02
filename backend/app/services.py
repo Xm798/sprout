@@ -12,7 +12,10 @@ from app.models import Schedule, Occurrence, ScheduleCreate
 from app.due_engine import compute_due_dates
 from app.bean_format import format_transaction, apply_beanfmt
 from app.postings import Posting, parse_postings, dump_postings, validate_postings, validate_overrides, struct_key
-from app.loan import amortize, LoanTerms, Event, validate_terms, validate_event_fields, DegenerateLoan
+from app.loan import (
+    amortize, LoanTerms, Event, validate_terms, validate_event_fields,
+    loan_terms_from_dict, DegenerateLoan,
+)
 from app.ledger import (
     ConflictError,  # noqa: F401  re-exported; routers reference services.ConflictError
     find_transaction,
@@ -33,10 +36,19 @@ class StaleOccurrence(Exception):
     """A pending loan occurrence whose amortization row no longer exists."""
 
 
+def loan_terms_from_schedule(sch: Schedule) -> LoanTerms:
+    """LoanTerms for a loan schedule, guarding the kind=loan ⟹ valid-loan-dict
+    invariant so a malformed row raises a clear domain error, not a bare
+    TypeError deep inside amortization."""
+    if sch.kind != "loan" or not isinstance(sch.loan, dict):
+        raise ValueError(
+            f"schedule {sch.id} is marked as a loan but has no valid loan parameters"
+        )
+    return loan_terms_from_dict(sch.loan, sch.anchor_date, sch.interval_count)
+
+
 def _loan_table(sch: Schedule) -> list:
-    terms = LoanTerms(**sch.loan, start_date=sch.anchor_date,
-                      interval_months=sch.interval_count)
-    return amortize(terms, [Event(**e) for e in (sch.events or [])])
+    return amortize(loan_terms_from_schedule(sch), [Event(**e) for e in (sch.events or [])])
 
 
 def _row_for(table: list, occ: Occurrence):
@@ -707,10 +719,8 @@ def validate_loan(payload: ScheduleCreate) -> list[str]:
     # Guard against degenerate terms (payment <= first-period interest).
     if not errors:
         try:
-            validate_terms(LoanTerms(
-                **loan,
-                start_date=payload.anchor_date,
-                interval_months=payload.interval_count,
+            validate_terms(loan_terms_from_dict(
+                loan, payload.anchor_date, payload.interval_count,
             ))
         except DegenerateLoan as exc:
             errors.append(f"degenerate loan: {exc}")
@@ -742,8 +752,7 @@ def validate_loan(payload: ScheduleCreate) -> list[str]:
 def loan_headline(sch: Schedule) -> tuple[Optional[str], Optional[str]]:
     """Return (amount_str, currency) for the first installment's payment leg."""
     try:
-        terms = LoanTerms(**sch.loan, start_date=sch.anchor_date,
-                          interval_months=sch.interval_count)
+        terms = loan_terms_from_schedule(sch)
         rows = amortize(terms, [])
         if not rows:
             return None, None

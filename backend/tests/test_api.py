@@ -708,6 +708,23 @@ def test_paid_outside_loan_occurrence(client):
     assert data["written_path"] is None
 
 
+def test_occurrence_response_hides_frozen_postings(client):
+    """Inbox/history responses expose loan fields but never the internal
+    frozen_postings snapshot."""
+    client.post("/api/schedules", json=new_loan_payload())
+    occ = client.get("/api/inbox").json()[0]
+    assert "frozen_postings" not in occ
+    assert "loan_event" in occ and "loan_seq" in occ and "event_id" in occ
+
+    # paid-outside freezes the split; the history view must still hide it.
+    r = client.post(f"/api/inbox/{occ['id']}/paid-outside")
+    assert r.status_code == 200, r.text
+    assert "frozen_postings" not in r.json()
+
+    hist = client.get("/api/history").json()
+    assert hist and all("frozen_postings" not in h for h in hist)
+
+
 def test_skip_loan_occurrence_422(client):
     """POST skip on a loan occurrence → 422 (skip is disabled for loans)."""
     client.post("/api/schedules", json=new_loan_payload())

@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session
 
 from app.db import get_session, get_config as _config
-from app.models import Occurrence
+from app.models import Occurrence, OccurrenceRead
 from app import services
 
 router = APIRouter(prefix="/history")
@@ -25,7 +25,7 @@ def _map_service_errors():
         raise HTTPException(422, str(exc))
 
 
-@router.get("", response_model=list[Occurrence])
+@router.get("", response_model=list[OccurrenceRead])
 def history(session: Session = Depends(get_session)) -> list[Occurrence]:
     return services.list_history(session)
 
@@ -37,7 +37,7 @@ def check(session: Session = Depends(get_session)) -> dict:
         return {"missing": services.find_missing_occurrences(session, cfg)}
 
 
-@router.post("/{occurrence_id}/readd", response_model=Occurrence)
+@router.post("/{occurrence_id}/readd", response_model=OccurrenceRead)
 def readd(occurrence_id: int, session: Session = Depends(get_session)) -> Occurrence:
     cfg = _config(session)
     with _map_service_errors():
@@ -52,14 +52,14 @@ def written(occurrence_id: int, session: Session = Depends(get_session)) -> dict
         return {"path": path, "text": text}
 
 
-@router.post("/{occurrence_id}/unconfirm", response_model=Occurrence)
+@router.post("/{occurrence_id}/unconfirm", response_model=OccurrenceRead)
 def unconfirm(occurrence_id: int, session: Session = Depends(get_session)) -> Occurrence:
     cfg = _config(session)
     with _map_service_errors():
         return services.unconfirm_occurrence(session, cfg, occurrence_id)
 
 
-@router.post("/{occurrence_id}/unskip", response_model=Occurrence)
+@router.post("/{occurrence_id}/unskip", response_model=OccurrenceRead)
 def unskip(occurrence_id: int, session: Session = Depends(get_session)) -> Occurrence:
     with _map_service_errors():
         return services.unskip_occurrence(session, occurrence_id)

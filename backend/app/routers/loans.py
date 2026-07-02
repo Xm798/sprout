@@ -3,12 +3,11 @@ import datetime
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from app.loan import LoanTerms, Event, amortize, DegenerateLoan
+from app.loan import (
+    Event, amortize, DegenerateLoan, loan_terms_from_dict, installment_to_dict,
+)
 
 router = APIRouter(prefix="/loans")
-
-# Fields that belong in LoanTerms (excludes start_date / interval_months which come from body).
-_LOAN_TERM_KEYS = {"principal", "annual_rate", "term_count", "method"}
 
 
 class AmortizationPreviewRequest(BaseModel):
@@ -24,12 +23,7 @@ def amortization_preview(body: AmortizationPreviewRequest) -> dict:
     try:
         if not 1 <= body.interval_count <= 12:
             raise ValueError("interval_count must be between 1 and 12")
-        loan_data = {k: v for k, v in body.loan.items() if k in _LOAN_TERM_KEYS}
-        terms = LoanTerms(
-            **loan_data,
-            start_date=body.anchor_date,
-            interval_months=body.interval_count,
-        )
+        terms = loan_terms_from_dict(body.loan, body.anchor_date, body.interval_count)
         if not 1 <= terms.term_count <= 1200:
             raise ValueError("term_count must be between 1 and 1200")
         events = [Event(**e) for e in body.events]
@@ -42,20 +36,7 @@ def amortization_preview(body: AmortizationPreviewRequest) -> dict:
     if not rows:
         raise HTTPException(422, "loan produced no installments")
 
-    serialized = [
-        {
-            "seq": r.seq,
-            "due_date": r.due_date.isoformat(),
-            "principal": str(r.principal),
-            "interest": str(r.interest),
-            "payment": str(r.payment),
-            "balance_after": str(r.balance_after),
-            "is_prepayment": r.is_prepayment,
-            "event_id": r.event_id,
-        }
-        for r in rows
-    ]
-
+    serialized = [installment_to_dict(r) for r in rows]
     total_interest = sum(r.interest for r in rows)
     return {
         "rows": serialized,

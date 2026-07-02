@@ -49,6 +49,33 @@ class DegenerateLoan(ValueError):
     """Loan params that never amortize to zero (payment <= first-period interest)."""
 
 
+_TERM_KEYS = ("principal", "annual_rate", "term_count", "method")
+
+
+def loan_terms_from_dict(loan: dict, start_date: date, interval_months: int) -> LoanTerms:
+    """Build LoanTerms from a loan parameter dict, keeping only known term keys.
+
+    Single construction point shared by schedule handling and the stateless
+    preview so the allow-list and field mapping live in one place.
+    """
+    data = {k: loan[k] for k in _TERM_KEYS if k in loan}
+    return LoanTerms(**data, start_date=start_date, interval_months=interval_months)
+
+
+def installment_to_dict(inst: "Installment") -> dict:
+    """Serialize an installment for JSON: Decimals as strings, date as ISO."""
+    return {
+        "seq": inst.seq,
+        "due_date": inst.due_date.isoformat(),
+        "principal": str(inst.principal),
+        "interest": str(inst.interest),
+        "payment": str(inst.payment),
+        "balance_after": str(inst.balance_after),
+        "is_prepayment": inst.is_prepayment,
+        "event_id": inst.event_id,
+    }
+
+
 def validate_event_fields(kind, amount=None, mode=None, annual_rate=None) -> None:
     """Validate a loan event's fields, raising ValueError on any problem.
 
