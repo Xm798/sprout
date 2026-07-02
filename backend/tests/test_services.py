@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 import sqlmodel
 
-from app.models import Schedule, Occurrence, ScheduleCreate
+from app.models import Schedule, Occurrence, ScheduleCreate, NotificationLog
 from app import services
 
 
@@ -938,3 +938,135 @@ def test_update_schedule_prunes_loan_pending_by_amortize(session, config):
     pending_dates = {o.due_date for o in pending_remaining}
     assert datetime.date(2026, 2, 1) in pending_dates, "installment 2 pending must be kept"
     assert datetime.date(2026, 3, 1) in pending_dates, "installment 3 pending must be kept"
+
+
+# ── NotificationLog cascade deletes (NEW-1) ───────────────────────────────────
+
+def _occ_with_log(session, config, today) -> tuple:
+    """Make a schedule, materialize, grab first occurrence, attach a NotificationLog."""
+    sch = _make_schedule(session)
+    services.materialize_occurrences(session, config, today)
+    occ = _first_occ(session, sch)
+    nl = NotificationLog(occurrence_id=occ.id, channel_id="chan-bark")
+    session.add(nl)
+    session.commit()
+    return sch, occ, nl.id
+
+
+def test_delete_schedule_removes_notification_logs(session, config, today):
+    """delete_schedule must delete NotificationLog rows for each occurrence, not
+    leave orphans that would FK-violate on PostgreSQL or silently re-send on SQLite."""
+    sch, occ, nl_id = _occ_with_log(session, config, today)
+
+    services.delete_schedule(session, sch.id)
+
+    # Both the occurrence and its log row must be gone.
+    assert session.get(NotificationLog, nl_id) is None
+    remaining = session.exec(
+        sqlmodel.select(NotificationLog).where(NotificationLog.occurrence_id == occ.id)
+    ).all()
+    assert remaining == []
+
+
+def test_update_schedule_removes_notification_log_for_pruned_occurrence(session, config, today):
+    """When update_schedule prunes a pending occurrence, its NotificationLog rows
+    must be deleted first — not orphaned."""
+    sch, occ, nl_id = _occ_with_log(session, config, today)
+
+    # Shift anchor far into the future so no existing occurrences fall in valid_dates;
+    # all pending occurrences (including occ above) will be pruned.
+    payload = ScheduleCreate(
+        name="Spotify", narration="sub", postings=_postings(),
+        interval_unit="month", interval_count=1,
+        anchor_date=datetime.date(2027, 1, 15), max_count=6, tags="sprout",
+    )
+    services.update_schedule(session, config, sch.id, payload, today)
+
+    assert session.get(NotificationLog, nl_id) is None
+
+
+# ── Model B: effective_horizon in update_schedule ─────────────────────────────
+
+def test_update_schedule_preserves_occurrence_in_reminder_window(session, config, today):
+    """With notify_lead_days=5 > lookahead_days=0, a behavior-preserving schedule
+    edit must NOT prune a still-valid occurrence within the lead window, nor its
+    NotificationLog row."""
+    config.notify_enabled = True
+    config.notify_lead_days = 5   # effective_horizon = today + 5
+
+    # Schedule anchored 3 days out: within lead window but beyond lookahead (0)
+    anchor = today + datetime.timedelta(days=3)
+    sch = Schedule(
+        name="Rent", payee="Landlord", narration="rent", postings=_postings(),
+        interval_unit="month", interval_count=1,
+        anchor_date=anchor, max_count=1, tags="sprout",
+    )
+    session.add(sch)
+    session.commit()
+    session.refresh(sch)
+
+    # Materialize within effective_horizon so the occurrence exists
+    services.materialize_occurrences(
+        session, config, today,
+        horizon=services.effective_horizon(config, today),
+    )
+    occ = _first_occ(session, sch)
+    assert occ is not None and occ.due_date == anchor
+
+    # Attach a NotificationLog (simulates reminder already sent)
+    nl = NotificationLog(occurrence_id=occ.id, channel_id="chan-ios")
+    session.add(nl)
+    session.commit()
+    nl_id = nl.id
+
+    # Behavior-preserving edit: change narration only
+    payload = ScheduleCreate(
+        name="Rent", narration="monthly rent", postings=_postings(),
+        interval_unit="month", interval_count=1,
+        anchor_date=anchor, max_count=1, tags="sprout",
+    )
+    services.update_schedule(session, config, sch.id, payload, today)
+
+    session.refresh(occ)
+    assert occ.status == "pending"                      # occurrence survives
+    assert session.get(NotificationLog, nl_id) is not None   # log survives
+
+
+def test_update_schedule_still_prunes_occurrence_not_in_new_rule(session, config, today):
+    """When the new rule genuinely no longer produces a date within effective_horizon,
+    that occurrence (and its NotificationLog) are still pruned."""
+    config.notify_enabled = True
+    config.notify_lead_days = 5
+
+    # Schedule anchored 3 days out
+    anchor = today + datetime.timedelta(days=3)
+    sch = Schedule(
+        name="Rent", payee="Landlord", narration="rent", postings=_postings(),
+        interval_unit="month", interval_count=1,
+        anchor_date=anchor, max_count=1, tags="sprout",
+    )
+    session.add(sch)
+    session.commit()
+    session.refresh(sch)
+
+    services.materialize_occurrences(
+        session, config, today,
+        horizon=services.effective_horizon(config, today),
+    )
+    occ = _first_occ(session, sch)
+    nl = NotificationLog(occurrence_id=occ.id, channel_id="chan-ios")
+    session.add(nl)
+    session.commit()
+    occ_id, nl_id = occ.id, nl.id
+
+    # Change anchor to a date the new rule doesn't produce within effective_horizon
+    # (far future: 2028); occurrence at `anchor` is stale under the new rule
+    payload = ScheduleCreate(
+        name="Rent", narration="rent", postings=_postings(),
+        interval_unit="month", interval_count=1,
+        anchor_date=datetime.date(2028, 1, 1), max_count=1, tags="sprout",
+    )
+    services.update_schedule(session, config, sch.id, payload, today)
+
+    assert session.get(Occurrence, occ_id) is None          # pruned
+    assert session.get(NotificationLog, nl_id) is None      # log pruned too

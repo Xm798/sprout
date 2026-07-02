@@ -4,6 +4,7 @@ import type {
   AppConfig,
   ConfirmBody,
   HistoryCheck,
+  NotificationSettings,
   Occurrence,
   ParseBeanRequest,
   ParsedTransaction,
@@ -123,4 +124,14 @@ export const api = {
   getConfig: () => http<AppConfig>("/config"),
   updateConfig: (body: AppConfig) =>
     http<AppConfig>("/config", { method: "PUT", body: JSON.stringify(body) }),
+
+  getNotifications: () => http<NotificationSettings>("/config/notifications"),
+  updateNotifications: (body: NotificationSettings) =>
+    http<NotificationSettings>("/config/notifications", {
+      method: "PUT", body: JSON.stringify(body),
+    }),
+  testNotification: (name?: string) =>
+    http<Record<string, boolean | string>>("/config/notifications/test", {
+      method: "POST", body: JSON.stringify({ channel_name: name ?? null }),
+    }),
 };

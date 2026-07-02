@@ -7,7 +7,7 @@ from typing import Optional
 from sqlmodel import Session, select
 
 from app.config import AppConfig
-from app.models import Schedule, Occurrence, ScheduleCreate
+from app.models import Schedule, Occurrence, ScheduleCreate, NotificationLog
 from app.due_engine import compute_due_dates
 from app.bean_format import format_transaction, apply_beanfmt
 from app.postings import Posting, parse_postings, dump_postings, validate_postings, validate_overrides, struct_key
@@ -76,6 +76,28 @@ def _materialization_horizon(config: AppConfig, today: datetime.date) -> datetim
     return today + datetime.timedelta(days=config.lookahead_days)
 
 
+def effective_horizon(config: AppConfig, today: datetime.date) -> datetime.date:
+    """The furthest-out date the app must account for: the inbox lookahead OR the
+    reminder lead window (when notifications are on), whichever is larger. Keeps
+    reminded occurrences visible/confirmable and safe from schedule-edit pruning."""
+    lead = config.notify_lead_days if config.notify_enabled else 0
+    return max(_materialization_horizon(config, today),
+               today + datetime.timedelta(days=lead))
+
+
+def _delete_occurrences(session: Session, occurrences: list[Occurrence]) -> None:
+    """Delete occurrences and their NotificationLog rows (manual cascade — SQLite
+    FK enforcement is off and Postgres would FK-violate on orphaned logs)."""
+    occ_ids = [o.id for o in occurrences]
+    if occ_ids:
+        for nl in session.exec(
+            select(NotificationLog).where(NotificationLog.occurrence_id.in_(occ_ids))
+        ).all():
+            session.delete(nl)
+    for o in occurrences:
+        session.delete(o)
+
+
 def valid_occurrence_keys(sch: Schedule, horizon: datetime.date) -> set[tuple]:
     """Return set of (loan_event, event_id, due_date) keys for all valid occurrences."""
     if sch.kind == "loan":
@@ -100,17 +122,19 @@ def reconcile_loan_pending(session: Session, config: AppConfig, sch: Schedule, t
 
     Does not commit — the caller is responsible for committing the session.
     """
-    horizon = _materialization_horizon(config, today)
+    # effective_horizon: reminders materialize past the inbox lookahead, so keys
+    # must be computed out to the reminder lead window or valid pendings there
+    # would be wrongly pruned (Model B).
+    horizon = effective_horizon(config, today)
     valid = valid_occurrence_keys(sch, horizon)
     pending = session.exec(
         select(Occurrence).where(
             Occurrence.schedule_id == sch.id, Occurrence.status == "pending"
         )
     ).all()
-    for occ in pending:
-        key = (occ.loan_event, occ.event_id, occ.due_date)
-        if key not in valid:
-            session.delete(occ)
+    stale = [occ for occ in pending
+             if (occ.loan_event, occ.event_id, occ.due_date) not in valid]
+    _delete_occurrences(session, stale)
 
 
 def materialize_occurrences(
@@ -689,14 +713,14 @@ def update_schedule(
     sch.postings = dump_postings(payload.postings)
     sch.updated_at = datetime.datetime.now()
 
-    horizon = _materialization_horizon(config, today)
-
     if sch.kind == "loan":
         # Prune pending occurrences whose amortization key no longer exists in the
         # updated table. Confirmed and skipped rows are kept intact.
         reconcile_loan_pending(session, config, sch, today)
     else:
-        # Dates the edited rule still produces within the materialization horizon.
+        # Dates the edited rule still produces within the effective horizon (covers
+        # both the inbox lookahead and the reminder lead window).
+        horizon = effective_horizon(config, today)
         valid_dates = set(compute_due_dates(
             payload.anchor_date, payload.interval_unit, payload.interval_count,
             horizon, payload.end_date, payload.max_count,
@@ -707,11 +731,13 @@ def update_schedule(
                 Occurrence.schedule_id == schedule_id, Occurrence.status != "confirmed"
             )
         ).all()
+        # A pending the new rule no longer produces is stale — drop it in one batch.
+        # Skipped rows are explicit user decisions and stay, like confirmed ones.
+        stale = [occ for occ in unconfirmed if occ.status == "pending" and occ.due_date not in valid_dates]
+        stale_ids = {o.id for o in stale}
+        _delete_occurrences(session, stale)
         for occ in unconfirmed:
-            # A pending the new rule no longer produces is stale — drop it.
-            # Skipped rows are explicit user decisions and stay, like confirmed ones.
-            if occ.status == "pending" and occ.due_date not in valid_dates:
-                session.delete(occ)
+            if occ.id in stale_ids:
                 continue
             if not occ.override_amounts:
                 continue
@@ -733,10 +759,9 @@ def delete_schedule(session: Session, schedule_id: int) -> None:
     sch = session.get(Schedule, schedule_id)
     if sch is None:
         raise LookupError(f"schedule {schedule_id} not found")
-    occs = session.exec(
+    occs = list(session.exec(
         select(Occurrence).where(Occurrence.schedule_id == schedule_id)
-    ).all()
-    for occ in occs:
-        session.delete(occ)
+    ).all())
+    _delete_occurrences(session, occs)
     session.delete(sch)
     session.commit()

@@ -4,6 +4,7 @@ import type {
   AmortizationPreviewBody,
   AppConfig,
   ConfirmBody,
+  NotificationSettings,
   ParseBeanRequest,
   PreviewBody,
   ScheduleCreate,
@@ -18,6 +19,7 @@ export const qk = {
   accounts: ["accounts"] as const,
   currencies: ["currencies"] as const,
   config: ["config"] as const,
+  notifications: ["notifications"] as const,
   beanFiles: ["bean-files"] as const,
   preview: (id: number, body: PreviewBody) => ["preview", id, body] as const,
   amortization: (body: AmortizationPreviewBody) => ["amortization", body] as const,
@@ -241,4 +243,20 @@ export function useUpdateConfig() {
     mutationFn: (body: AppConfig) => api.updateConfig(body),
     onSuccess: () => qc.invalidateQueries({ queryKey: qk.config }),
   });
+}
+
+export function useNotifications() {
+  return useQuery({ queryKey: qk.notifications, queryFn: api.getNotifications });
+}
+
+export function useUpdateNotifications() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: NotificationSettings) => api.updateNotifications(body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.notifications }),
+  });
+}
+
+export function useTestNotification() {
+  return useMutation({ mutationFn: (name?: string) => api.testNotification(name) });
 }

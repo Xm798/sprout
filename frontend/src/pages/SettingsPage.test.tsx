@@ -16,6 +16,10 @@ vi.mock("../api/client", () => {
       currencies: vi.fn().mockResolvedValue(["USD", "CNY"]),
       getConfig: vi.fn().mockResolvedValue(config),
       updateConfig: vi.fn().mockResolvedValue({ ...config, lookahead_days: 7 }),
+      getNotifications: vi.fn().mockResolvedValue({
+        notify_enabled: false, notify_lead_days: 0, notify_time: "08:00",
+        notify_timezone: "", notify_channels: [],
+      }),
     },
   };
 });
@@ -29,7 +33,8 @@ test("loads config and saves an edited value", async () => {
   const lookahead = await screen.findByLabelText(/lookahead days/i);
   await user.clear(lookahead);
   await user.type(lookahead, "7");
-  await user.click(screen.getByRole("button", { name: /save/i }));
+  // Click the settings form's submit button (first "Save" in DOM; a second one belongs to NotificationsSettings).
+  await user.click(screen.getAllByRole("button", { name: /save/i })[0]);
 
   await waitFor(() => expect(api.updateConfig).toHaveBeenCalledTimes(1));
   const arg = (api.updateConfig as ReturnType<typeof vi.fn>).mock.calls[0][0];

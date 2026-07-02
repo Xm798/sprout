@@ -78,3 +78,23 @@ describe("api client", () => {
     );
   });
 });
+
+describe("notification settings client", () => {
+  it("GET hits /api/config/notifications", async () => {
+    const json = { notify_enabled: true, notify_channels: [] };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(json), { status: 200 })));
+    const out = await api.getNotifications();
+    expect(out.notify_enabled).toBe(true);
+    expect((fetch as any).mock.calls[0][0]).toContain("/api/config/notifications");
+  });
+
+  it("PUT sends settings body", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      new Response("{}", { status: 200 })));
+    await api.updateNotifications({ notify_enabled: false, notify_lead_days: 1,
+      notify_time: "08:00", notify_timezone: "UTC", notify_channels: [] });
+    const [, opts] = (fetch as any).mock.calls[0];
+    expect(opts.method).toBe("PUT");
+  });
+});

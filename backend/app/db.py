@@ -3,11 +3,10 @@ from pathlib import Path
 
 from alembic import command
 from alembic.config import Config
-from alembic.script import ScriptDirectory
 from fastapi import HTTPException
-from sqlalchemy import inspect
+from sqlalchemy import event
 from sqlalchemy.engine import make_url
-from sqlmodel import SQLModel, Session, create_engine
+from sqlmodel import Session, SQLModel, create_engine
 
 # Apply naming convention BEFORE any table is reflected or defined so constraint
 # names are stable and can be referenced in migrations (drop by name on Postgres;
@@ -46,7 +45,15 @@ def make_engine(url: str | None = None):
     connect_args = {}
     if is_sqlite_url(resolved):
         connect_args["check_same_thread"] = False
-    return create_engine(resolved, connect_args=connect_args)
+    eng = create_engine(resolved, connect_args=connect_args)
+    if is_sqlite_url(resolved):
+        @event.listens_for(eng, "connect")
+        def _sqlite_pragmas(dbapi_conn, _record):
+            cur = dbapi_conn.cursor()
+            cur.execute("PRAGMA journal_mode=WAL")
+            cur.execute("PRAGMA busy_timeout=5000")
+            cur.close()
+    return eng
 
 
 engine = make_engine()
@@ -59,25 +66,10 @@ def _alembic_config() -> Config:
     return Config(str(ini_path))
 
 
-def _adopt_pre_alembic_db(cfg: Config) -> None:
-    """Databases created by the old SQLModel.create_all path already have the
-    baseline tables but no alembic_version row. Running `upgrade` on them would
-    try to CREATE TABLE over existing tables and fail, so stamp them at the
-    baseline revision first — its schema matches what create_all produced.
-    A fresh database has no tables and is left untouched for upgrade to build."""
-    tables = set(inspect(engine).get_table_names())
-    if "alembic_version" in tables:
-        return  # already under Alembic's control
-    if tables & set(SQLModel.metadata.tables):
-        base = ScriptDirectory.from_config(cfg).get_base()
-        command.stamp(cfg, base)
-
-
 def init_db() -> None:
     """Bring the database schema up to date by running Alembic migrations,
     then seed the singleton AppConfig row if it is missing."""
     cfg = _alembic_config()
-    _adopt_pre_alembic_db(cfg)
     command.upgrade(cfg, "head")
     with Session(engine) as session:
         existing = session.get(AppConfig, 1)

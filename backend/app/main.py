@@ -1,4 +1,5 @@
 import os
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
@@ -6,9 +7,28 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
 from app.db import init_db
+from app.notify import scheduler as _scheduler
 from app.routers import schedules, inbox, history, meta, exchange_rates, loans
 
-app = FastAPI(title="Sprout")
+
+def _scheduler_enabled() -> bool:
+    return os.getenv("SPROUT_ENABLE_SCHEDULER", "1").lower() not in ("0", "false", "no", "")
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    init_db()
+    enabled = _scheduler_enabled()
+    if enabled:
+        _scheduler.start()
+    try:
+        yield
+    finally:
+        if enabled:
+            _scheduler.shutdown()
+
+
+app = FastAPI(title="Sprout", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -23,11 +43,6 @@ app.include_router(history.router, prefix="/api")
 app.include_router(meta.router, prefix="/api")
 app.include_router(exchange_rates.router, prefix="/api")
 app.include_router(loans.router, prefix="/api")
-
-
-@app.on_event("startup")
-def _startup() -> None:
-    init_db()
 
 
 def _safe_static_path(full_path: str, static_root: Path) -> Path:

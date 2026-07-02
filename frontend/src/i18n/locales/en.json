@@ -29,6 +29,7 @@
   "common": {
     "loading": "Loading…",
     "saving": "Saving…",
+    "save": "Save",
     "cancel": "Cancel",
     "scheduleFallback": "Schedule {{id}}",
     "status": {
@@ -236,6 +237,20 @@
     "removeEvent": "Remove event",
     "eventAddedToast": "Event applied",
     "eventFailedToast": "Couldn't apply the event"
+  },
+  "notify": {
+    "title": "Notifications",
+    "enabled": "Enable due reminders",
+    "description": "Remind me before each recurring payment is due",
+    "leadDays": "Days before due",
+    "time": "Daily time",
+    "timezone": "Timezone",
+    "channelName": "Name",
+    "appriseUrl": "Apprise URL",
+    "test": "Test",
+    "testAll": "Test all",
+    "addChannel": "Add channel",
+    "saved": "Notification settings saved"
   },
   "settings": {
     "title": "Settings",

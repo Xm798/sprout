@@ -24,9 +24,13 @@ class PreviewBody(ConfirmBody):
 @router.get("", response_model=list[Occurrence])
 def inbox(session: Session = Depends(get_session)) -> list[Occurrence]:
     cfg = _config(session)
-    services.materialize_occurrences(session, cfg, datetime.date.today())
+    today = datetime.date.today()
+    ceiling = services.effective_horizon(cfg, today)
+    services.materialize_occurrences(session, cfg, today, horizon=ceiling)
     return session.exec(
-        select(Occurrence).where(Occurrence.status == "pending").order_by(Occurrence.due_date)
+        select(Occurrence)
+        .where(Occurrence.status == "pending", Occurrence.due_date <= ceiling)
+        .order_by(Occurrence.due_date)
     ).all()
 
 

@@ -2,9 +2,7 @@ import datetime
 import json
 
 from sqlalchemy import inspect, text
-from sqlmodel import SQLModel
 
-import app.db as db_module
 from app.db import _alembic_config, make_engine
 
 
@@ -69,42 +67,6 @@ def test_alembic_upgrade_builds_schema_on_fresh_sqlite(tmp_path, monkeypatch):
     assert "ix_occurrence_schedule_id" in indexes
 
 
-def test_init_db_adopts_pre_alembic_database(tmp_path, monkeypatch):
-    """A database created by the old SQLModel.create_all path (tables present,
-    no alembic_version) must be adopted via stamp — not crash trying to
-    CREATE TABLE over existing tables.
-
-    A real pre-Alembic database carries exactly the *baseline* schema (it was
-    created before any later migration existed), so simulate it by upgrading to
-    the base revision and dropping alembic_version — not via create_all on the
-    current metadata, which would also contain post-baseline tables and so
-    misrepresent what a legacy database actually looks like."""
-    from alembic import command
-    from alembic.script import ScriptDirectory
-
-    db_file = tmp_path / "legacy.db"
-    monkeypatch.setenv("SPROUT_DATABASE_URL", f"sqlite:///{db_file}")
-    cfg = _alembic_config()
-    base = ScriptDirectory.from_config(cfg).get_base()
-    command.upgrade(cfg, base)  # baseline schema only
-
-    legacy_engine = make_engine(f"sqlite:///{db_file}")
-    with legacy_engine.begin() as c:
-        c.execute(text("DROP TABLE alembic_version"))  # back to a pre-Alembic state
-    assert "alembic_version" not in inspect(legacy_engine).get_table_names()
-
-    monkeypatch.setattr(db_module, "engine", legacy_engine)
-
-    db_module.init_db()  # must not raise
-    db_module.init_db()  # idempotent
-
-    insp = inspect(legacy_engine)
-    assert "alembic_version" in insp.get_table_names()
-    with legacy_engine.connect() as c:
-        version = c.execute(text("select version_num from alembic_version")).scalar()
-    assert version is not None
-
-
 def test_loan_migration_upgrades_legacy_row_and_adds_defaults(tmp_path, monkeypatch):
     """A DB stamped at the pre-loan head (3410f3212aec) with a schedule row must
     survive upgrade head with kind='fixed' and events=[] backfilled from server defaults."""
@@ -162,3 +124,14 @@ def test_schedule_model_has_target_file_default_none(session):
     session.commit()
     session.refresh(sch)
     assert sch.target_file is None
+
+
+def test_sqlite_engine_sets_wal_and_busy_timeout(tmp_path):
+    from app.db import make_engine
+    import sqlalchemy as sa
+
+    eng = make_engine(f"sqlite:///{tmp_path/'x.db'}")
+    with eng.connect() as c:
+        assert c.execute(sa.text("PRAGMA journal_mode")).scalar().lower() == "wal"
+        assert int(c.execute(sa.text("PRAGMA busy_timeout")).scalar()) >= 5000
+    eng.dispose()
