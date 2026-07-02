@@ -594,6 +594,24 @@ def test_rename_channel_via_id_with_masked_url(client):
     assert send.call_args.args[0][0]["url"] == "bark://h/secret"
 
 
+def test_idless_payload_reuses_existing_channel_id(client):
+    """An id-less PUT (hand-written client) must reattach to the existing
+    channel by name instead of minting a new id — the id is the reminder-dedup
+    key, so a new id would re-fire every pending reminder."""
+    client.put("/api/config/notifications", json={
+        "notify_enabled": True, "notify_lead_days": 0, "notify_time": "08:00",
+        "notify_timezone": "UTC",
+        "notify_channels": [{"name": "ios", "url": "bark://h/k", "enabled": True}]})
+    original_id = client.get("/api/config/notifications").json()["notify_channels"][0]["id"]
+    assert original_id
+    client.put("/api/config/notifications", json={
+        "notify_enabled": True, "notify_lead_days": 0, "notify_time": "08:00",
+        "notify_timezone": "UTC",
+        "notify_channels": [{"name": "ios", "url": "••••", "enabled": False}]})
+    got = client.get("/api/config/notifications").json()["notify_channels"][0]
+    assert got["id"] == original_id and got["enabled"] is False
+
+
 def test_get_notifications_includes_channel_id(client):
     chan_id = "myid42"
     client.put("/api/config/notifications", json={

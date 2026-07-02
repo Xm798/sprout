@@ -68,9 +68,9 @@ class Occurrence(SQLModel, table=True):
 
 class NotificationLog(SQLModel, table=True):
     """One row per (occurrence, channel) successfully reminded — the dedup ledger."""
-    __table_args__ = (UniqueConstraint("occurrence_id", "channel_name"),)
+    __table_args__ = (UniqueConstraint("occurrence_id", "channel_id"),)
 
     id: Optional[int] = Field(default=None, primary_key=True)
     occurrence_id: int = Field(foreign_key="occurrence.id", index=True)
-    channel_name: str
+    channel_id: str
     sent_at: datetime.datetime = Field(default_factory=datetime.datetime.now)

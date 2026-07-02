@@ -578,7 +578,7 @@ def _occ_with_log(session, config, today) -> tuple:
     sch = _make_schedule(session)
     services.materialize_occurrences(session, config, today)
     occ = _first_occ(session, sch)
-    nl = NotificationLog(occurrence_id=occ.id, channel_name="bark")
+    nl = NotificationLog(occurrence_id=occ.id, channel_id="chan-bark")
     session.add(nl)
     session.commit()
     return sch, occ, nl.id
@@ -645,7 +645,7 @@ def test_update_schedule_preserves_occurrence_in_reminder_window(session, config
     assert occ is not None and occ.due_date == anchor
 
     # Attach a NotificationLog (simulates reminder already sent)
-    nl = NotificationLog(occurrence_id=occ.id, channel_name="ios")
+    nl = NotificationLog(occurrence_id=occ.id, channel_id="chan-ios")
     session.add(nl)
     session.commit()
     nl_id = nl.id
@@ -685,7 +685,7 @@ def test_update_schedule_still_prunes_occurrence_not_in_new_rule(session, config
         horizon=services.effective_horizon(config, today),
     )
     occ = _first_occ(session, sch)
-    nl = NotificationLog(occurrence_id=occ.id, channel_name="ios")
+    nl = NotificationLog(occurrence_id=occ.id, channel_id="chan-ios")
     session.add(nl)
     session.commit()
     occ_id, nl_id = occ.id, nl.id

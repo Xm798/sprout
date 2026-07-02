@@ -111,11 +111,13 @@ def put_notifications(payload: NotificationSettings,
     cfg = _config(session)
     existing: dict[str, str] = {}
     existing_by_id: dict[str, str] = {}
+    id_by_name: dict[str, str] = {}
     # F6: build id- and name-keyed lookups so a rename (new name, masked URL, same id) resolves correctly
     for c in (cfg.notify_channels or []):
         existing[c["name"]] = c.get("url", "")
         if c.get("id"):
             existing_by_id[c["id"]] = c.get("url", "")
+            id_by_name[c["name"]] = c["id"]
     resolved: list[dict] = []
     for ch in payload.notify_channels:
         if not ch.name:
@@ -127,7 +129,10 @@ def put_notifications(payload: NotificationSettings,
             url = ch.url
         if not url:
             raise HTTPException(422, f"channel {ch.name} needs a URL")
-        chan_id = ch.id or uuid.uuid4().hex
+        # Keep the stable id: it is the reminder-dedup key, so an id-less payload
+        # (hand-written client) must reattach to the existing channel by name
+        # rather than mint a new identity and re-fire every pending reminder.
+        chan_id = ch.id or id_by_name.get(ch.name) or uuid.uuid4().hex
         resolved.append({"id": chan_id, "name": ch.name, "url": url, "enabled": ch.enabled})
 
     cfg.notify_enabled = payload.notify_enabled

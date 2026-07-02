@@ -7,7 +7,7 @@ from app.notify import scheduler as sch
 
 def _cfg(**over):
     c = AppConfig(id=1, notify_enabled=True, notify_time="08:00",
-                  notify_channels=[{"name": "ios", "url": "bark://h/k", "enabled": True}])
+                  notify_channels=[{"id": "id-ios", "name": "ios", "url": "bark://h/k", "enabled": True}])
     for k, v in over.items():
         setattr(c, k, v)
     return c

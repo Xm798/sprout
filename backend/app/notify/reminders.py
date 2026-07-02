@@ -12,8 +12,9 @@ logger = logging.getLogger(__name__)
 
 
 def enabled_channels(cfg: AppConfig) -> list[dict]:
+    # "id" is required: it is the NotificationLog dedup key (names are mutable).
     return [c for c in (cfg.notify_channels or [])
-            if c.get("enabled") and c.get("url") and c.get("name")]
+            if c.get("enabled") and c.get("url") and c.get("name") and c.get("id")]
 
 
 def _headline(sch: Schedule) -> str:
@@ -52,7 +53,7 @@ def run_due_reminders(session: Session, cfg: AppConfig, now: datetime.datetime) 
         for nl in session.exec(
             select(NotificationLog).where(NotificationLog.occurrence_id.in_(occ_ids))
         ).all():
-            already_by_occ.setdefault(nl.occurrence_id, set()).add(nl.channel_name)
+            already_by_occ.setdefault(nl.occurrence_id, set()).add(nl.channel_id)
 
     sch_by_id = {s.id: s for s in session.exec(
         select(Schedule).where(Schedule.id.in_({o.schedule_id for o in due}))
@@ -62,7 +63,7 @@ def run_due_reminders(session: Session, cfg: AppConfig, now: datetime.datetime) 
     for occ in due:
         try:
             already = already_by_occ.get(occ.id, set())
-            pending = [c for c in chans if c["name"] not in already]
+            pending = [c for c in chans if c["id"] not in already]
             if not pending:
                 continue
             sch = sch_by_id.get(occ.schedule_id)
@@ -70,12 +71,15 @@ def run_due_reminders(session: Session, cfg: AppConfig, now: datetime.datetime) 
                 continue
             title, body = _reminder_text(sch, occ)
             results = send_to_channels(pending, title, body)
+            # send_to_channels keys results by name (for human-facing output);
+            # names are unique within the config, so map back to the stable id.
+            id_by_name = {c["name"]: c["id"] for c in pending}
             for name, ok in results.items():
                 if isinstance(ok, bool):
                     # Log any completed boolean attempt (True or False) for dedup.
                     # String values mean the send never reached the service (e.g.
                     # invalid URL / exception) and should be retried next tick.
-                    session.add(NotificationLog(occurrence_id=occ.id, channel_name=name))
+                    session.add(NotificationLog(occurrence_id=occ.id, channel_id=id_by_name[name]))
                     if ok:
                         sent += 1
             session.commit()

@@ -26,11 +26,11 @@ def upgrade() -> None:
         "notificationlog",
         sa.Column("id", sa.Integer(), nullable=False),
         sa.Column("occurrence_id", sa.Integer(), nullable=False),
-        sa.Column("channel_name", sqlmodel.sql.sqltypes.AutoString(), nullable=False),
+        sa.Column("channel_id", sqlmodel.sql.sqltypes.AutoString(), nullable=False),
         sa.Column("sent_at", sa.DateTime(), nullable=False),
         sa.ForeignKeyConstraint(["occurrence_id"], ["occurrence.id"]),
         sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("occurrence_id", "channel_name"),
+        sa.UniqueConstraint("occurrence_id", "channel_id"),
     )
     op.create_index(op.f("ix_notificationlog_occurrence_id"), "notificationlog", ["occurrence_id"], unique=False)
 
