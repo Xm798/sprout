@@ -1,5 +1,6 @@
 import datetime
 import logging
+import uuid
 from decimal import Decimal
 from pathlib import Path
 from typing import Optional
@@ -111,6 +112,107 @@ def reconcile_loan_pending(session: Session, config: AppConfig, sch: Schedule, t
         key = (occ.loan_event, occ.event_id, occ.due_date)
         if key not in valid:
             session.delete(occ)
+
+
+def freeze_boundary(session: Session, schedule_id: int) -> Optional[datetime.date]:
+    """Due date of the last confirmed occurrence for this schedule, or None.
+
+    Loan events must land strictly after this boundary so already-confirmed
+    installments stay frozen. This is the single owner of the invariant; the
+    /events routes and any other mutation path must go through here.
+    """
+    confirmed = session.exec(
+        select(Occurrence).where(
+            Occurrence.schedule_id == schedule_id,
+            Occurrence.status == "confirmed",
+        )
+    ).all()
+    return max(occ.due_date for occ in confirmed) if confirmed else None
+
+
+def add_loan_event(
+    session: Session, config: AppConfig, schedule_id: int,
+    event: dict, today: datetime.date,
+) -> Schedule:
+    """Append a prepayment/rate-change event to a loan schedule.
+
+    Owns the payment-date and freeze-boundary invariants, event construction,
+    and pending-tail reconciliation. Raises LookupError (unknown schedule) or
+    ValueError/DegenerateLoan (invalid event or degenerate result).
+    """
+    sch = session.get(Schedule, schedule_id)
+    if sch is None:
+        raise LookupError(f"schedule {schedule_id} not found")
+    if sch.kind != "loan":
+        raise ValueError("events are only supported for loan schedules")
+
+    event_date = event["date"]
+    # Payment dates are the regular (non-prepayment) due dates of the current table.
+    payment_dates = {row.due_date for row in _loan_table(sch) if not row.is_prepayment}
+    if event_date not in payment_dates:
+        raise ValueError(f"event date {event_date} is not a scheduled payment date")
+
+    boundary = freeze_boundary(session, schedule_id)
+    if boundary is not None and event_date <= boundary:
+        raise ValueError(
+            f"event date {event_date} must be strictly after the last confirmed "
+            f"installment ({boundary})"
+        )
+
+    event_dict: dict = {
+        "id": event.get("id") or uuid.uuid4().hex,
+        "kind": event["kind"],
+        "date": event_date.isoformat(),
+    }
+    if event.get("amount") is not None:
+        event_dict["amount"] = str(event["amount"])
+    if event.get("mode") is not None:
+        event_dict["mode"] = event["mode"]
+    if event.get("annual_rate") is not None:
+        event_dict["annual_rate"] = str(event["annual_rate"])
+
+    sch.events = [*sch.events, event_dict]
+    sch.updated_at = datetime.datetime.now()
+    reconcile_loan_pending(session, config, sch, today)
+    session.add(sch)
+    session.commit()
+    session.refresh(sch)
+    return sch
+
+
+def remove_loan_event(
+    session: Session, config: AppConfig, schedule_id: int,
+    event_id: str, today: datetime.date,
+) -> Schedule:
+    """Remove an event from a loan schedule, enforcing the freeze boundary.
+
+    Raises LookupError (unknown schedule or event) or ValueError/DegenerateLoan.
+    """
+    sch = session.get(Schedule, schedule_id)
+    if sch is None:
+        raise LookupError(f"schedule {schedule_id} not found")
+    if sch.kind != "loan":
+        raise ValueError("events are only supported for loan schedules")
+
+    target = next((e for e in (sch.events or []) if e.get("id") == event_id), None)
+    if target is None:
+        raise LookupError(f"event {event_id!r} not found on this schedule")
+
+    event_date = datetime.date.fromisoformat(target["date"])
+    boundary = freeze_boundary(session, schedule_id)
+    if boundary is not None and event_date <= boundary:
+        raise ValueError(
+            f"event {event_id!r} is on {event_date}, at or before the last confirmed "
+            f"installment ({boundary}); frozen events cannot be removed"
+        )
+
+    sch.events = [e for e in (sch.events or []) if e.get("id") != event_id]
+    sch.updated_at = datetime.datetime.now()
+    reconcile_loan_pending(session, config, sch, today)
+    session.add(sch)
+    session.commit()
+    session.refresh(sch)
+    return sch
 
 
 def materialize_occurrences(
@@ -684,7 +786,19 @@ def update_schedule(
     old = {p.id: struct_key(p) for p in parse_postings(sch.postings)}
     new = {p.id: struct_key(p) for p in payload.postings}
 
-    for key, value in payload.model_dump(exclude={"postings"}).items():
+    # Loan events are managed exclusively through the event endpoints, which
+    # enforce the freeze boundary. A schedule update must never rewrite them:
+    # the edit form does not send events, so overwriting would silently wipe
+    # recorded prepayment/rate-change history. Preserve stored events; reject
+    # an attempt to change them here so the freeze boundary cannot be bypassed.
+    incoming_events = payload.events or []
+    if incoming_events and incoming_events != (sch.events or []):
+        raise ValueError(
+            "loan events cannot be modified via schedule update; "
+            "use the event endpoints"
+        )
+
+    for key, value in payload.model_dump(exclude={"postings", "events"}).items():
         setattr(sch, key, value)
     sch.postings = dump_postings(payload.postings)
     sch.updated_at = datetime.datetime.now()

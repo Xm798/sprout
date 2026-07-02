@@ -739,6 +739,45 @@ def test_add_degenerate_rate_change_event_422(client):
     assert (sch["events"] or []) == []
 
 
+# ── schedule update must not touch loan events ────────────────────────────────
+
+def test_update_schedule_preserves_loan_events(client):
+    """PUT that omits events keeps recorded prepayment/rate-change events intact."""
+    sid = client.post("/api/schedules", json=new_loan_payload()).json()["id"]
+
+    r = client.post(f"/api/schedules/{sid}/events", json={
+        "kind": "prepayment", "date": "2026-02-15",
+        "amount": "5000", "mode": "reduce_payment",
+    })
+    assert r.status_code == 200, r.text
+    event_id = r.json()["events"][0]["id"]
+
+    # PUT with no events field (the edit form never sends events).
+    payload = new_loan_payload()
+    payload["narration"] = "updated narration"
+    r = client.put(f"/api/schedules/{sid}", json=payload)
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert data["narration"] == "updated narration"
+    assert any(e["id"] == event_id for e in data["events"]), "events must be preserved"
+
+
+def test_update_schedule_rejects_event_rewrite(client):
+    """PUT that rewrites the events array is rejected; nothing is persisted."""
+    sid = client.post("/api/schedules", json=new_loan_payload()).json()["id"]
+
+    payload = new_loan_payload()
+    payload["events"] = [{
+        "id": "injected", "kind": "prepayment", "date": "2026-02-15",
+        "amount": "5000", "mode": "reduce_payment",
+    }]
+    r = client.put(f"/api/schedules/{sid}", json=payload)
+    assert r.status_code == 422, r.text
+
+    sch = client.get(f"/api/schedules/{sid}").json()
+    assert (sch["events"] or []) == []
+
+
 # ── I2: kind flip on confirmed loan → 422 ─────────────────────────────────────
 
 def test_update_confirmed_loan_kind_flip_422(client):

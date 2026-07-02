@@ -1,5 +1,4 @@
 import datetime
-import uuid
 from decimal import Decimal
 from typing import Optional
 
@@ -11,7 +10,7 @@ from app.bean_parse import ParseError, ParsedTransaction, parse_transaction
 from app.config import AppConfig
 from app.db import get_session, get_config
 from app.loan import DegenerateLoan
-from app.models import Occurrence, Schedule, ScheduleBase, ScheduleCreate, ScheduleRead
+from app.models import Schedule, ScheduleBase, ScheduleCreate, ScheduleRead
 from app.postings import parse_postings, validate_postings, headline, dump_postings
 from app.writer import validate_target_file
 from app import services
@@ -95,6 +94,8 @@ def update(schedule_id: int, payload: ScheduleCreate, session: Session = Depends
         )
     except LookupError as exc:
         raise HTTPException(404, str(exc))
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
     return _read(sch)
 
 
@@ -116,61 +117,19 @@ class EventBody(BaseModel):
     annual_rate: Optional[Decimal] = None  # rate_change
 
 
-def _get_freeze_boundary(session: Session, schedule_id: int) -> Optional[datetime.date]:
-    """Return the last confirmed occurrence's due_date for this schedule, or None."""
-    confirmed = session.exec(
-        select(Occurrence).where(
-            Occurrence.schedule_id == schedule_id,
-            Occurrence.status == "confirmed",
-        )
-    ).all()
-    return max(occ.due_date for occ in confirmed) if confirmed else None
-
-
 @router.post("/{schedule_id}/events", response_model=ScheduleRead)
 def add_event(
     schedule_id: int, body: EventBody, session: Session = Depends(get_session)
 ) -> ScheduleRead:
     config = get_config(session)
-    sch = session.get(Schedule, schedule_id)
-    if sch is None:
-        raise HTTPException(404, "schedule not found")
-    if sch.kind != "loan":
-        raise HTTPException(422, "events are only supported for loan schedules")
-
-    # Payment dates are regular (non-prepayment) due dates in the current table.
-    table = services._loan_table(sch)
-    payment_dates = {row.due_date for row in table if not row.is_prepayment}
-    if body.date not in payment_dates:
-        raise HTTPException(422, f"event date {body.date} is not a scheduled payment date")
-
-    # Freeze boundary: event must land strictly after the last confirmed occurrence.
-    freeze_boundary = _get_freeze_boundary(session, schedule_id)
-    if freeze_boundary is not None and body.date <= freeze_boundary:
-        raise HTTPException(
-            422,
-            f"event date {body.date} must be strictly after the last confirmed "
-            f"installment ({freeze_boundary})",
-        )
-
-    event_id = body.id or uuid.uuid4().hex
-    event_dict: dict = {"id": event_id, "kind": body.kind, "date": body.date.isoformat()}
-    if body.amount is not None:
-        event_dict["amount"] = str(body.amount)
-    if body.mode is not None:
-        event_dict["mode"] = body.mode
-    if body.annual_rate is not None:
-        event_dict["annual_rate"] = str(body.annual_rate)
-
-    sch.events = [*sch.events, event_dict]
-    sch.updated_at = datetime.datetime.now()
     try:
-        services.reconcile_loan_pending(session, config, sch, datetime.date.today())
+        sch = services.add_loan_event(
+            session, config, schedule_id, body.model_dump(), datetime.date.today()
+        )
+    except LookupError as exc:
+        raise HTTPException(404, str(exc))
     except (DegenerateLoan, ValueError) as exc:
         raise HTTPException(422, str(exc))
-    session.add(sch)
-    session.commit()
-    session.refresh(sch)
     return _read(sch)
 
 
@@ -179,34 +138,12 @@ def delete_event(
     schedule_id: int, event_id: str, session: Session = Depends(get_session)
 ) -> ScheduleRead:
     config = get_config(session)
-    sch = session.get(Schedule, schedule_id)
-    if sch is None:
-        raise HTTPException(404, "schedule not found")
-    if sch.kind != "loan":
-        raise HTTPException(422, "events are only supported for loan schedules")
-
-    # Find the target event first — needed for the freeze-boundary check.
-    target = next((e for e in (sch.events or []) if e.get("id") == event_id), None)
-    if target is None:
-        raise HTTPException(404, f"event {event_id!r} not found on this schedule")
-
-    event_date = datetime.date.fromisoformat(target["date"])
-    freeze_boundary = _get_freeze_boundary(session, schedule_id)
-    if freeze_boundary is not None and event_date <= freeze_boundary:
-        raise HTTPException(
-            422,
-            f"event {event_id!r} is on {event_date}, at or before the last confirmed "
-            f"installment ({freeze_boundary}); frozen events cannot be removed",
-        )
-
-    remaining = [e for e in (sch.events or []) if e.get("id") != event_id]
-    sch.events = remaining
-    sch.updated_at = datetime.datetime.now()
     try:
-        services.reconcile_loan_pending(session, config, sch, datetime.date.today())
+        sch = services.remove_loan_event(
+            session, config, schedule_id, event_id, datetime.date.today()
+        )
+    except LookupError as exc:
+        raise HTTPException(404, str(exc))
     except (DegenerateLoan, ValueError) as exc:
         raise HTTPException(422, str(exc))
-    session.add(sch)
-    session.commit()
-    session.refresh(sch)
     return _read(sch)
