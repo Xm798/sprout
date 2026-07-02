@@ -49,6 +49,57 @@ class DegenerateLoan(ValueError):
     """Loan params that never amortize to zero (payment <= first-period interest)."""
 
 
+_TERM_KEYS = ("principal", "annual_rate", "term_count", "method")
+
+
+def loan_terms_from_dict(loan: dict, start_date: date, interval_months: int) -> LoanTerms:
+    """Build LoanTerms from a loan parameter dict, keeping only known term keys.
+
+    Single construction point shared by schedule handling and the stateless
+    preview so the allow-list and field mapping live in one place.
+    """
+    data = {k: loan[k] for k in _TERM_KEYS if k in loan}
+    return LoanTerms(**data, start_date=start_date, interval_months=interval_months)
+
+
+def installment_to_dict(inst: "Installment") -> dict:
+    """Serialize an installment for JSON: Decimals as strings, date as ISO."""
+    return {
+        "seq": inst.seq,
+        "due_date": inst.due_date.isoformat(),
+        "principal": str(inst.principal),
+        "interest": str(inst.interest),
+        "payment": str(inst.payment),
+        "balance_after": str(inst.balance_after),
+        "is_prepayment": inst.is_prepayment,
+        "event_id": inst.event_id,
+    }
+
+
+def validate_event_fields(kind, amount=None, mode=None, annual_rate=None) -> None:
+    """Validate a loan event's fields, raising ValueError on any problem.
+
+    Single source of truth for event shape, shared by the preview endpoint and
+    the schedule event mutations. A negative prepayment would otherwise inflate
+    the balance, and an unknown kind / missing amount would surface as a raw
+    TypeError deep inside amortize.
+    """
+    if kind not in {"prepayment", "rate_change"}:
+        raise ValueError(f"event kind must be 'prepayment' or 'rate_change', got {kind!r}")
+    if kind == "prepayment":
+        if amount is None:
+            raise ValueError("prepayment requires an amount")
+        if Decimal(str(amount)) <= 0:
+            raise ValueError("prepayment amount must be greater than zero")
+        if mode not in {"shorten_term", "reduce_payment"}:
+            raise ValueError("prepayment mode must be 'shorten_term' or 'reduce_payment'")
+    else:  # rate_change
+        if annual_rate is None:
+            raise ValueError("rate_change requires an annual_rate")
+        if Decimal(str(annual_rate)) < 0:
+            raise ValueError("rate_change annual_rate must be >= 0")
+
+
 def equal_payment_amount(principal: Decimal, r: Decimal, n: int) -> Decimal:
     if r == 0:
         return money(principal / n)
@@ -79,6 +130,8 @@ def _remaining_count(balance: Decimal, r: Decimal, payment: Decimal) -> int:
 def amortize(terms: LoanTerms, events: list[Event] | None = None) -> list[Installment]:
     validate_terms(terms)
     events = sorted(events or [], key=lambda e: e.date)
+    for ev in events:
+        validate_event_fields(ev.kind, ev.amount, ev.mode, ev.annual_rate)
     r = monthly_rate(terms.annual_rate, terms.interval_months)
     balance = money(terms.principal)
     rows: list[Installment] = []
@@ -121,6 +174,14 @@ def amortize(terms: LoanTerms, events: list[Event] | None = None) -> list[Instal
             else:
                 per_principal, remaining, r = _recompute_equal_principal(ev, balance, r, per_principal, remaining, im)
         seq += 1
+
+    # An event whose date is not exactly a payment date is never consumed (and,
+    # before this guard, silently blocked every later event). Fail loudly rather
+    # than diverge from the client's stated intent.
+    if ei < len(events):
+        raise ValueError(
+            f"event on {events[ei].date} does not fall on a scheduled payment date"
+        )
 
     return rows
 

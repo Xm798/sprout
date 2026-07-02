@@ -575,6 +575,78 @@ def test_amortization_preview_endpoint(client):
     assert isinstance(body["total_interest"], str)
 
 
+def test_amortization_preview_with_events(client):
+    """Preview with a valid prepayment + rate-change: the prepayment row appears,
+    the payoff shortens below the base term, and total interest matches the golden."""
+    r = client.post("/api/loans/amortization", json={
+        "loan": {"principal": "100000", "annual_rate": "0.05",
+                 "term_count": 360, "method": "equal_payment"},
+        "anchor_date": "2026-01-15",
+        "interval_count": 1,
+        "events": [
+            {"id": "p1", "kind": "prepayment", "date": "2027-01-15",
+             "amount": "20000", "mode": "shorten_term"},
+            {"id": "r1", "kind": "rate_change", "date": "2028-01-15",
+             "annual_rate": "0.06"},
+        ],
+    })
+    assert r.status_code == 200, r.text
+    body = r.json()
+    prepay_rows = [row for row in body["rows"] if row["is_prepayment"]]
+    assert len(prepay_rows) == 1
+    assert prepay_rows[0]["event_id"] == "p1"
+    regular_rows = [row for row in body["rows"] if not row["is_prepayment"]]
+    assert len(regular_rows) < 360  # shortened by the prepayment
+    assert body["rows"][-1]["balance_after"] == "0.00"
+    assert body["total_interest"] == "57073.02"
+
+
+def test_amortization_preview_off_payment_date_event_422(client):
+    r = client.post("/api/loans/amortization", json={
+        "loan": {"principal": "100000", "annual_rate": "0.05",
+                 "term_count": 360, "method": "equal_payment"},
+        "anchor_date": "2026-01-15",
+        "interval_count": 1,
+        "events": [{"id": "p1", "kind": "prepayment", "date": "2026-02-20",
+                    "amount": "5000", "mode": "shorten_term"}],
+    })
+    assert r.status_code == 422, r.text
+
+
+def test_amortization_preview_negative_prepayment_422(client):
+    r = client.post("/api/loans/amortization", json={
+        "loan": {"principal": "100000", "annual_rate": "0.05",
+                 "term_count": 360, "method": "equal_payment"},
+        "anchor_date": "2026-01-15",
+        "interval_count": 1,
+        "events": [{"id": "p1", "kind": "prepayment", "date": "2026-02-15",
+                    "amount": "-50000", "mode": "shorten_term"}],
+    })
+    assert r.status_code == 422, r.text
+
+
+def test_amortization_preview_unknown_kind_422(client):
+    r = client.post("/api/loans/amortization", json={
+        "loan": {"principal": "100000", "annual_rate": "0.05",
+                 "term_count": 360, "method": "equal_payment"},
+        "anchor_date": "2026-01-15",
+        "interval_count": 1,
+        "events": [{"id": "e1", "kind": "bogus", "date": "2026-02-15"}],
+    })
+    assert r.status_code == 422, r.text
+
+
+def test_amortization_preview_oversized_term_count_422(client):
+    r = client.post("/api/loans/amortization", json={
+        "loan": {"principal": "100000", "annual_rate": "0.05",
+                 "term_count": 100000000, "method": "equal_payment"},
+        "anchor_date": "2026-01-15",
+        "interval_count": 1,
+        "events": [],
+    })
+    assert r.status_code == 422, r.text
+
+
 def test_add_event_rejects_on_or_before_confirmed_boundary(client):
     # Create a 360-month loan with anchor_date 2026-01-15.
     sid = client.post("/api/schedules", json=new_loan_payload()).json()["id"]
@@ -634,6 +706,23 @@ def test_paid_outside_loan_occurrence(client):
     data = r.json()
     assert data["status"] == "confirmed"
     assert data["written_path"] is None
+
+
+def test_occurrence_response_hides_frozen_postings(client):
+    """Inbox/history responses expose loan fields but never the internal
+    frozen_postings snapshot."""
+    client.post("/api/schedules", json=new_loan_payload())
+    occ = client.get("/api/inbox").json()[0]
+    assert "frozen_postings" not in occ
+    assert "loan_event" in occ and "loan_seq" in occ and "event_id" in occ
+
+    # paid-outside freezes the split; the history view must still hide it.
+    r = client.post(f"/api/inbox/{occ['id']}/paid-outside")
+    assert r.status_code == 200, r.text
+    assert "frozen_postings" not in r.json()
+
+    hist = client.get("/api/history").json()
+    assert hist and all("frozen_postings" not in h for h in hist)
 
 
 def test_skip_loan_occurrence_422(client):
@@ -735,6 +824,45 @@ def test_add_degenerate_rate_change_event_422(client):
     assert r.status_code == 422, r.text
 
     # The bad event must not have been persisted.
+    sch = client.get(f"/api/schedules/{sid}").json()
+    assert (sch["events"] or []) == []
+
+
+# ── schedule update must not touch loan events ────────────────────────────────
+
+def test_update_schedule_preserves_loan_events(client):
+    """PUT that omits events keeps recorded prepayment/rate-change events intact."""
+    sid = client.post("/api/schedules", json=new_loan_payload()).json()["id"]
+
+    r = client.post(f"/api/schedules/{sid}/events", json={
+        "kind": "prepayment", "date": "2026-02-15",
+        "amount": "5000", "mode": "reduce_payment",
+    })
+    assert r.status_code == 200, r.text
+    event_id = r.json()["events"][0]["id"]
+
+    # PUT with no events field (the edit form never sends events).
+    payload = new_loan_payload()
+    payload["narration"] = "updated narration"
+    r = client.put(f"/api/schedules/{sid}", json=payload)
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert data["narration"] == "updated narration"
+    assert any(e["id"] == event_id for e in data["events"]), "events must be preserved"
+
+
+def test_update_schedule_rejects_event_rewrite(client):
+    """PUT that rewrites the events array is rejected; nothing is persisted."""
+    sid = client.post("/api/schedules", json=new_loan_payload()).json()["id"]
+
+    payload = new_loan_payload()
+    payload["events"] = [{
+        "id": "injected", "kind": "prepayment", "date": "2026-02-15",
+        "amount": "5000", "mode": "reduce_payment",
+    }]
+    r = client.put(f"/api/schedules/{sid}", json=payload)
+    assert r.status_code == 422, r.text
+
     sch = client.get(f"/api/schedules/{sid}").json()
     assert (sch["events"] or []) == []
 

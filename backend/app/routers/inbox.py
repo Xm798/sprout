@@ -5,7 +5,7 @@ from pydantic import BaseModel
 from sqlmodel import Session, select
 
 from app.db import get_session, get_config as _config
-from app.models import Occurrence
+from app.models import Occurrence, OccurrenceRead
 from app import services
 
 router = APIRouter(prefix="/inbox")
@@ -21,7 +21,7 @@ class PreviewBody(ConfirmBody):
     pass
 
 
-@router.get("", response_model=list[Occurrence])
+@router.get("", response_model=list[OccurrenceRead])
 def inbox(session: Session = Depends(get_session)) -> list[Occurrence]:
     cfg = _config(session)
     today = datetime.date.today()
@@ -61,7 +61,7 @@ def preview_transient(occurrence_id: int, body: PreviewBody, session: Session = 
         raise HTTPException(422, str(exc))
 
 
-@router.post("/{occurrence_id}/confirm", response_model=Occurrence)
+@router.post("/{occurrence_id}/confirm", response_model=OccurrenceRead)
 def confirm(occurrence_id: int, body: ConfirmBody, session: Session = Depends(get_session)) -> Occurrence:
     cfg = _config(session)
     try:
@@ -80,7 +80,7 @@ def confirm(occurrence_id: int, body: ConfirmBody, session: Session = Depends(ge
         raise HTTPException(422, str(exc))
 
 
-@router.post("/{occurrence_id}/skip", response_model=Occurrence)
+@router.post("/{occurrence_id}/skip", response_model=OccurrenceRead)
 def skip(occurrence_id: int, session: Session = Depends(get_session)) -> Occurrence:
     try:
         return services.skip_occurrence(session, occurrence_id)
@@ -90,14 +90,12 @@ def skip(occurrence_id: int, session: Session = Depends(get_session)) -> Occurre
         raise HTTPException(422, str(exc))
 
 
-@router.post("/{occurrence_id}/paid-outside", response_model=Occurrence)
+@router.post("/{occurrence_id}/paid-outside", response_model=OccurrenceRead)
 def paid_outside(occurrence_id: int, session: Session = Depends(get_session)) -> Occurrence:
     cfg = _config(session)
     try:
         return services.mark_paid_outside(session, cfg, occurrence_id)
     except LookupError as exc:
         raise HTTPException(404, str(exc))
-    except services.ConflictError as exc:
-        raise HTTPException(409, str(exc))
     except ValueError as exc:
         raise HTTPException(422, str(exc))

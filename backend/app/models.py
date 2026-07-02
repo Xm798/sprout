@@ -96,7 +96,9 @@ class Occurrence(SQLModel, table=True):
     override_date: Optional[datetime.date] = None
     override_narration: Optional[str] = None
     written_path: Optional[str] = None
-    sprout_id: Optional[str] = None
+    # Indexed: materialization probes existence by sprout_id for every past
+    # installment on every inbox fetch.
+    sprout_id: Optional[str] = Field(default=None, index=True)
     confirmed_at: Optional[datetime.datetime] = None
     loan_seq: Optional[int] = None
     loan_event: str = "regular"  # non-null sentinel; part of widened unique constraint
@@ -115,3 +117,22 @@ class NotificationLog(SQLModel, table=True):
     occurrence_id: int = Field(foreign_key="occurrence.id", index=True)
     channel_id: str
     sent_at: datetime.datetime = Field(default_factory=datetime.datetime.now)
+
+
+class OccurrenceRead(SQLModel):
+    """API-facing view of an occurrence. Excludes frozen_postings (an internal
+    posting snapshot) while exposing the loan fields the frontend consumes."""
+
+    id: int
+    schedule_id: int
+    due_date: datetime.date
+    status: str
+    override_amounts: dict[str, str] = Field(default_factory=dict)
+    override_date: Optional[datetime.date] = None
+    override_narration: Optional[str] = None
+    written_path: Optional[str] = None
+    sprout_id: Optional[str] = None
+    confirmed_at: Optional[datetime.datetime] = None
+    loan_seq: Optional[int] = None
+    loan_event: str = "regular"
+    event_id: str = ""

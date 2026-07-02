@@ -135,6 +135,13 @@ export interface Occurrence {
   written_path?: string | null;
   sprout_id?: string | null;
   confirmed_at?: string | null;
+  // Loan-schedule provenance. Regular (non-loan) rows use the backend
+  // sentinels: loan_event "regular" and event_id "" (never null); loan_seq is
+  // the 1-based installment index and is null on rows that aren't a scheduled
+  // installment. All three are read-only, echoed straight from the server.
+  loan_seq?: number | null;
+  loan_event?: string;
+  event_id?: string;
 }
 
 export interface HistoryCheck {

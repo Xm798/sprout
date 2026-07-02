@@ -1,5 +1,6 @@
 import datetime
 import logging
+import uuid
 from decimal import Decimal
 from pathlib import Path
 from typing import Optional
@@ -11,7 +12,10 @@ from app.models import Schedule, Occurrence, ScheduleCreate, NotificationLog
 from app.due_engine import compute_due_dates
 from app.bean_format import format_transaction, apply_beanfmt
 from app.postings import Posting, parse_postings, dump_postings, validate_postings, validate_overrides, struct_key
-from app.loan import amortize, LoanTerms, Event, validate_terms, DegenerateLoan
+from app.loan import (
+    amortize, LoanTerms, Event, validate_terms, validate_event_fields,
+    loan_terms_from_dict, DegenerateLoan,
+)
 from app.ledger import (
     ConflictError,  # noqa: F401  re-exported; routers reference services.ConflictError
     find_transaction,
@@ -32,10 +36,19 @@ class StaleOccurrence(Exception):
     """A pending loan occurrence whose amortization row no longer exists."""
 
 
+def loan_terms_from_schedule(sch: Schedule) -> LoanTerms:
+    """LoanTerms for a loan schedule, guarding the kind=loan ⟹ valid-loan-dict
+    invariant so a malformed row raises a clear domain error, not a bare
+    TypeError deep inside amortization."""
+    if sch.kind != "loan" or not isinstance(sch.loan, dict):
+        raise ValueError(
+            f"schedule {sch.id} is marked as a loan but has no valid loan parameters"
+        )
+    return loan_terms_from_dict(sch.loan, sch.anchor_date, sch.interval_count)
+
+
 def _loan_table(sch: Schedule) -> list:
-    terms = LoanTerms(**sch.loan, start_date=sch.anchor_date,
-                      interval_months=sch.interval_count)
-    return amortize(terms, [Event(**e) for e in (sch.events or [])])
+    return amortize(loan_terms_from_schedule(sch), [Event(**e) for e in (sch.events or [])])
 
 
 def _row_for(table: list, occ: Occurrence):
@@ -98,14 +111,21 @@ def _delete_occurrences(session: Session, occurrences: list[Occurrence]) -> None
         session.delete(o)
 
 
-def valid_occurrence_keys(sch: Schedule, horizon: datetime.date) -> set[tuple]:
-    """Return set of (loan_event, event_id, due_date) keys for all valid occurrences."""
+def valid_occurrence_keys(
+    sch: Schedule, horizon: datetime.date, table: list | None = None
+) -> set[tuple]:
+    """Return set of (loan_event, event_id, due_date) keys for all valid occurrences.
+
+    `table` lets a caller that already amortized reuse the result so the loan
+    table is not recomputed.
+    """
     if sch.kind == "loan":
+        table = table if table is not None else _loan_table(sch)
         return {
             ("prepayment" if inst.is_prepayment else "regular",
              inst.event_id or "",
              inst.due_date)
-            for inst in _loan_table(sch)
+            for inst in table
             if inst.due_date <= horizon
         }
     return {
@@ -117,16 +137,21 @@ def valid_occurrence_keys(sch: Schedule, horizon: datetime.date) -> set[tuple]:
     }
 
 
-def reconcile_loan_pending(session: Session, config: AppConfig, sch: Schedule, today: datetime.date) -> None:
+def reconcile_loan_pending(
+    session: Session, config: AppConfig, sch: Schedule, today: datetime.date,
+    table: list | None = None,
+) -> None:
     """Prune stale pending occurrences for a loan schedule after its events or params change.
 
     Does not commit — the caller is responsible for committing the session.
+    `table` reuses an already-computed amortization table (event mutations pass it
+    so amortize runs once).
     """
     # effective_horizon: reminders materialize past the inbox lookahead, so keys
     # must be computed out to the reminder lead window or valid pendings there
     # would be wrongly pruned (Model B).
     horizon = effective_horizon(config, today)
-    valid = valid_occurrence_keys(sch, horizon)
+    valid = valid_occurrence_keys(sch, horizon, table=table)
     pending = session.exec(
         select(Occurrence).where(
             Occurrence.schedule_id == sch.id, Occurrence.status == "pending"
@@ -137,6 +162,110 @@ def reconcile_loan_pending(session: Session, config: AppConfig, sch: Schedule, t
     _delete_occurrences(session, stale)
 
 
+def freeze_boundary(session: Session, schedule_id: int) -> Optional[datetime.date]:
+    """Due date of the last confirmed occurrence for this schedule, or None.
+
+    Loan events must land strictly after this boundary so already-confirmed
+    installments stay frozen. This is the single owner of the invariant; the
+    /events routes and any other mutation path must go through here.
+    """
+    confirmed = session.exec(
+        select(Occurrence).where(
+            Occurrence.schedule_id == schedule_id,
+            Occurrence.status == "confirmed",
+        )
+    ).all()
+    return max(occ.due_date for occ in confirmed) if confirmed else None
+
+
+def add_loan_event(
+    session: Session, config: AppConfig, schedule_id: int,
+    event: dict, today: datetime.date,
+) -> Schedule:
+    """Append a prepayment/rate-change event to a loan schedule.
+
+    Owns the payment-date and freeze-boundary invariants, event construction,
+    and pending-tail reconciliation. Raises LookupError (unknown schedule) or
+    ValueError/DegenerateLoan (invalid event or degenerate result).
+    """
+    sch = session.get(Schedule, schedule_id)
+    if sch is None:
+        raise LookupError(f"schedule {schedule_id} not found")
+    if sch.kind != "loan":
+        raise ValueError("events are only supported for loan schedules")
+
+    validate_event_fields(
+        event.get("kind"), event.get("amount"), event.get("mode"), event.get("annual_rate")
+    )
+
+    event_date = event["date"]
+    boundary = freeze_boundary(session, schedule_id)
+    if boundary is not None and event_date <= boundary:
+        raise ValueError(
+            f"event date {event_date} must be strictly after the last confirmed "
+            f"installment ({boundary})"
+        )
+
+    event_dict: dict = {
+        "id": event.get("id") or uuid.uuid4().hex,
+        "kind": event["kind"],
+        "date": event_date.isoformat(),
+    }
+    if event.get("amount") is not None:
+        event_dict["amount"] = str(event["amount"])
+    if event.get("mode") is not None:
+        event_dict["mode"] = event["mode"]
+    if event.get("annual_rate") is not None:
+        event_dict["annual_rate"] = str(event["annual_rate"])
+
+    sch.events = [*sch.events, event_dict]
+    sch.updated_at = datetime.datetime.now()
+    # One amortization for the mutation: it validates the event lands on a
+    # payment date (amortize rejects unconsumed events) and feeds reconcile.
+    table = _loan_table(sch)
+    reconcile_loan_pending(session, config, sch, today, table=table)
+    session.add(sch)
+    session.commit()
+    session.refresh(sch)
+    return sch
+
+
+def remove_loan_event(
+    session: Session, config: AppConfig, schedule_id: int,
+    event_id: str, today: datetime.date,
+) -> Schedule:
+    """Remove an event from a loan schedule, enforcing the freeze boundary.
+
+    Raises LookupError (unknown schedule or event) or ValueError/DegenerateLoan.
+    """
+    sch = session.get(Schedule, schedule_id)
+    if sch is None:
+        raise LookupError(f"schedule {schedule_id} not found")
+    if sch.kind != "loan":
+        raise ValueError("events are only supported for loan schedules")
+
+    target = next((e for e in (sch.events or []) if e.get("id") == event_id), None)
+    if target is None:
+        raise LookupError(f"event {event_id!r} not found on this schedule")
+
+    event_date = datetime.date.fromisoformat(target["date"])
+    boundary = freeze_boundary(session, schedule_id)
+    if boundary is not None and event_date <= boundary:
+        raise ValueError(
+            f"event {event_id!r} is on {event_date}, at or before the last confirmed "
+            f"installment ({boundary}); frozen events cannot be removed"
+        )
+
+    sch.events = [e for e in (sch.events or []) if e.get("id") != event_id]
+    sch.updated_at = datetime.datetime.now()
+    table = _loan_table(sch)
+    reconcile_loan_pending(session, config, sch, today, table=table)
+    session.add(sch)
+    session.commit()
+    session.refresh(sch)
+    return sch
+
+
 def materialize_occurrences(
     session: Session, config: AppConfig, today: datetime.date,
     horizon: datetime.date | None = None,
@@ -145,6 +274,13 @@ def materialize_occurrences(
     created = 0
     schedules = session.exec(select(Schedule).where(Schedule.status == "active")).all()
     for sch in schedules:
+        # One query per schedule instead of one per installment: load this
+        # schedule's existing sprout_ids and test membership in memory.
+        existing = {
+            sid for sid in session.exec(
+                select(Occurrence.sprout_id).where(Occurrence.schedule_id == sch.id)
+            ).all() if sid is not None
+        }
         if sch.kind == "loan":
             for inst in _loan_table(sch):
                 if inst.due_date > horizon:
@@ -156,10 +292,7 @@ def materialize_occurrences(
                     sprout_id = f"sch{sch.id}-{d:%Y%m%d}-pp{event_id}"
                 else:
                     sprout_id = f"sch{sch.id}-{d:%Y%m%d}"
-                exists = session.exec(
-                    select(Occurrence).where(Occurrence.sprout_id == sprout_id)
-                ).first()
-                if exists:
+                if sprout_id in existing:
                     continue
                 session.add(Occurrence(
                     schedule_id=sch.id, due_date=d, status="pending",
@@ -169,6 +302,7 @@ def materialize_occurrences(
                     event_id=event_id,
                     frozen_postings=None,
                 ))
+                existing.add(sprout_id)
                 created += 1
         else:
             dates = compute_due_dates(
@@ -176,17 +310,14 @@ def materialize_occurrences(
                 horizon, sch.end_date, sch.max_count,
             )
             for d in dates:
-                exists = session.exec(
-                    select(Occurrence).where(
-                        Occurrence.schedule_id == sch.id, Occurrence.due_date == d
-                    )
-                ).first()
-                if exists:
+                sprout_id = f"sch{sch.id}-{d:%Y%m%d}"
+                if sprout_id in existing:
                     continue
                 session.add(Occurrence(
                     schedule_id=sch.id, due_date=d, status="pending",
-                    sprout_id=f"sch{sch.id}-{d:%Y%m%d}",
+                    sprout_id=sprout_id,
                 ))
+                existing.add(sprout_id)
                 created += 1
     session.commit()
     return created
@@ -577,6 +708,9 @@ def validate_loan(payload: ScheduleCreate) -> list[str]:
     if payload.interval_unit != "month":
         errors.append("loan schedules must use interval_unit='month'")
 
+    if not 1 <= payload.interval_count <= 12:
+        errors.append("interval_count must be between 1 and 12")
+
     loan = payload.loan
 
     try:
@@ -597,6 +731,8 @@ def validate_loan(payload: ScheduleCreate) -> list[str]:
         term_count = int(loan.get("term_count", 0))
         if term_count <= 0:
             errors.append("term_count must be > 0")
+        elif term_count > 1200:
+            errors.append("term_count must be <= 1200")
     except Exception:
         errors.append("term_count must be a valid integer")
 
@@ -607,10 +743,8 @@ def validate_loan(payload: ScheduleCreate) -> list[str]:
     # Guard against degenerate terms (payment <= first-period interest).
     if not errors:
         try:
-            validate_terms(LoanTerms(
-                **loan,
-                start_date=payload.anchor_date,
-                interval_months=payload.interval_count,
+            validate_terms(loan_terms_from_dict(
+                loan, payload.anchor_date, payload.interval_count,
             ))
         except DegenerateLoan as exc:
             errors.append(f"degenerate loan: {exc}")
@@ -642,8 +776,7 @@ def validate_loan(payload: ScheduleCreate) -> list[str]:
 def loan_headline(sch: Schedule) -> tuple[Optional[str], Optional[str]]:
     """Return (amount_str, currency) for the first installment's payment leg."""
     try:
-        terms = LoanTerms(**sch.loan, start_date=sch.anchor_date,
-                          interval_months=sch.interval_count)
+        terms = loan_terms_from_schedule(sch)
         rows = amortize(terms, [])
         if not rows:
             return None, None
@@ -708,7 +841,19 @@ def update_schedule(
     old = {p.id: struct_key(p) for p in parse_postings(sch.postings)}
     new = {p.id: struct_key(p) for p in payload.postings}
 
-    for key, value in payload.model_dump(exclude={"postings"}).items():
+    # Loan events are managed exclusively through the event endpoints, which
+    # enforce the freeze boundary. A schedule update must never rewrite them:
+    # the edit form does not send events, so overwriting would silently wipe
+    # recorded prepayment/rate-change history. Preserve stored events; reject
+    # an attempt to change them here so the freeze boundary cannot be bypassed.
+    incoming_events = payload.events or []
+    if incoming_events and incoming_events != (sch.events or []):
+        raise ValueError(
+            "loan events cannot be modified via schedule update; "
+            "use the event endpoints"
+        )
+
+    for key, value in payload.model_dump(exclude={"postings", "events"}).items():
         setattr(sch, key, value)
     sch.postings = dump_postings(payload.postings)
     sch.updated_at = datetime.datetime.now()
