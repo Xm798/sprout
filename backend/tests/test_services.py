@@ -816,6 +816,27 @@ def test_materialize_creates_loan_occurrences_with_seq(session, config, today):
 # Task 12: skip guard, mark_paid_outside, update_schedule loan pruning
 # ---------------------------------------------------------------------------
 
+def test_add_loan_event_amortizes_once(session, config, monkeypatch):
+    """An event mutation amortizes the loan a single time (shared with reconcile)."""
+    sch = _make_loan_schedule(session)
+
+    calls = {"n": 0}
+    real = services._loan_table
+
+    def counting(s):
+        calls["n"] += 1
+        return real(s)
+
+    monkeypatch.setattr(services, "_loan_table", counting)
+    services.add_loan_event(
+        session, config, sch.id,
+        {"kind": "prepayment", "date": datetime.date(2026, 3, 1),
+         "amount": "10000", "mode": "shorten_term"},
+        datetime.date(2026, 1, 1),
+    )
+    assert calls["n"] == 1
+
+
 def test_skip_disabled_on_loan(session, config):
     """skip_occurrence must raise ValueError for loan occurrences; status unchanged."""
     sch = _make_loan_schedule(session)

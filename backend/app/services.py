@@ -77,14 +77,21 @@ def _materialization_horizon(config: AppConfig, today: datetime.date) -> datetim
     return today + datetime.timedelta(days=config.lookahead_days)
 
 
-def valid_occurrence_keys(sch: Schedule, horizon: datetime.date) -> set[tuple]:
-    """Return set of (loan_event, event_id, due_date) keys for all valid occurrences."""
+def valid_occurrence_keys(
+    sch: Schedule, horizon: datetime.date, table: list | None = None
+) -> set[tuple]:
+    """Return set of (loan_event, event_id, due_date) keys for all valid occurrences.
+
+    `table` lets a caller that already amortized reuse the result so the loan
+    table is not recomputed.
+    """
     if sch.kind == "loan":
+        table = table if table is not None else _loan_table(sch)
         return {
             ("prepayment" if inst.is_prepayment else "regular",
              inst.event_id or "",
              inst.due_date)
-            for inst in _loan_table(sch)
+            for inst in table
             if inst.due_date <= horizon
         }
     return {
@@ -96,13 +103,18 @@ def valid_occurrence_keys(sch: Schedule, horizon: datetime.date) -> set[tuple]:
     }
 
 
-def reconcile_loan_pending(session: Session, config: AppConfig, sch: Schedule, today: datetime.date) -> None:
+def reconcile_loan_pending(
+    session: Session, config: AppConfig, sch: Schedule, today: datetime.date,
+    table: list | None = None,
+) -> None:
     """Prune stale pending occurrences for a loan schedule after its events or params change.
 
     Does not commit — the caller is responsible for committing the session.
+    `table` reuses an already-computed amortization table (event mutations pass it
+    so amortize runs once).
     """
     horizon = _materialization_horizon(config, today)
-    valid = valid_occurrence_keys(sch, horizon)
+    valid = valid_occurrence_keys(sch, horizon, table=table)
     pending = session.exec(
         select(Occurrence).where(
             Occurrence.schedule_id == sch.id, Occurrence.status == "pending"
@@ -151,11 +163,6 @@ def add_loan_event(
     )
 
     event_date = event["date"]
-    # Payment dates are the regular (non-prepayment) due dates of the current table.
-    payment_dates = {row.due_date for row in _loan_table(sch) if not row.is_prepayment}
-    if event_date not in payment_dates:
-        raise ValueError(f"event date {event_date} is not a scheduled payment date")
-
     boundary = freeze_boundary(session, schedule_id)
     if boundary is not None and event_date <= boundary:
         raise ValueError(
@@ -177,7 +184,10 @@ def add_loan_event(
 
     sch.events = [*sch.events, event_dict]
     sch.updated_at = datetime.datetime.now()
-    reconcile_loan_pending(session, config, sch, today)
+    # One amortization for the mutation: it validates the event lands on a
+    # payment date (amortize rejects unconsumed events) and feeds reconcile.
+    table = _loan_table(sch)
+    reconcile_loan_pending(session, config, sch, today, table=table)
     session.add(sch)
     session.commit()
     session.refresh(sch)
@@ -212,7 +222,8 @@ def remove_loan_event(
 
     sch.events = [e for e in (sch.events or []) if e.get("id") != event_id]
     sch.updated_at = datetime.datetime.now()
-    reconcile_loan_pending(session, config, sch, today)
+    table = _loan_table(sch)
+    reconcile_loan_pending(session, config, sch, today, table=table)
     session.add(sch)
     session.commit()
     session.refresh(sch)
@@ -227,6 +238,13 @@ def materialize_occurrences(
     created = 0
     schedules = session.exec(select(Schedule).where(Schedule.status == "active")).all()
     for sch in schedules:
+        # One query per schedule instead of one per installment: load this
+        # schedule's existing sprout_ids and test membership in memory.
+        existing = {
+            sid for sid in session.exec(
+                select(Occurrence.sprout_id).where(Occurrence.schedule_id == sch.id)
+            ).all() if sid is not None
+        }
         if sch.kind == "loan":
             for inst in _loan_table(sch):
                 if inst.due_date > horizon:
@@ -238,10 +256,7 @@ def materialize_occurrences(
                     sprout_id = f"sch{sch.id}-{d:%Y%m%d}-pp{event_id}"
                 else:
                     sprout_id = f"sch{sch.id}-{d:%Y%m%d}"
-                exists = session.exec(
-                    select(Occurrence).where(Occurrence.sprout_id == sprout_id)
-                ).first()
-                if exists:
+                if sprout_id in existing:
                     continue
                 session.add(Occurrence(
                     schedule_id=sch.id, due_date=d, status="pending",
@@ -251,6 +266,7 @@ def materialize_occurrences(
                     event_id=event_id,
                     frozen_postings=None,
                 ))
+                existing.add(sprout_id)
                 created += 1
         else:
             dates = compute_due_dates(
@@ -258,17 +274,14 @@ def materialize_occurrences(
                 horizon, sch.end_date, sch.max_count,
             )
             for d in dates:
-                exists = session.exec(
-                    select(Occurrence).where(
-                        Occurrence.schedule_id == sch.id, Occurrence.due_date == d
-                    )
-                ).first()
-                if exists:
+                sprout_id = f"sch{sch.id}-{d:%Y%m%d}"
+                if sprout_id in existing:
                     continue
                 session.add(Occurrence(
                     schedule_id=sch.id, due_date=d, status="pending",
-                    sprout_id=f"sch{sch.id}-{d:%Y%m%d}",
+                    sprout_id=sprout_id,
                 ))
+                existing.add(sprout_id)
                 created += 1
     session.commit()
     return created

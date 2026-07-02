@@ -96,7 +96,9 @@ class Occurrence(SQLModel, table=True):
     override_date: Optional[datetime.date] = None
     override_narration: Optional[str] = None
     written_path: Optional[str] = None
-    sprout_id: Optional[str] = None
+    # Indexed: materialization probes existence by sprout_id for every past
+    # installment on every inbox fetch.
+    sprout_id: Optional[str] = Field(default=None, index=True)
     confirmed_at: Optional[datetime.datetime] = None
     loan_seq: Optional[int] = None
     loan_event: str = "regular"  # non-null sentinel; part of widened unique constraint
