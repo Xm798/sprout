@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { memo, useState } from "react";
 import { Loader2, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -11,6 +11,7 @@ import {
 import type {
   AmortizationEvent,
   AmortizationResult,
+  AmortizationRow,
   LoanData,
   PrepaymentMode,
   ScheduleEventBody,
@@ -113,7 +114,38 @@ export function AmortizationTable({
   );
 }
 
-function PreviewBody({
+// A schedule can be up to term_count (360+) rows, each redrawn whenever the
+// parent re-renders (fetch spinner, event edits). Memoizing on the row/data
+// reference — stable while the preview result is unchanged — keeps those
+// thousands of formatted cells from re-rendering needlessly.
+const PreviewRow = memo(function PreviewRow({
+  row,
+  prepaymentTag,
+}: {
+  row: AmortizationRow;
+  prepaymentTag: string;
+}) {
+  return (
+    <tr
+      className={cn(
+        "border-t border-border/40",
+        row.is_prepayment && "bg-primary/10 font-medium text-primary"
+      )}
+    >
+      <td className="px-2 py-1 text-left">
+        {row.seq}
+        {row.is_prepayment && <span className="ml-1 text-xs">{prepaymentTag}</span>}
+      </td>
+      <td className="px-2 py-1 text-left font-mono">{row.due_date}</td>
+      <td className="px-2 py-1 font-mono">{formatAmount(row.principal)}</td>
+      <td className="px-2 py-1 font-mono">{formatAmount(row.interest)}</td>
+      <td className="px-2 py-1 font-mono">{formatAmount(row.payment)}</td>
+      <td className="px-2 py-1 font-mono">{formatAmount(row.balance_after)}</td>
+    </tr>
+  );
+});
+
+const PreviewBody = memo(function PreviewBody({
   data,
   currency,
 }: {
@@ -121,6 +153,7 @@ function PreviewBody({
   currency?: string;
 }) {
   const { t } = useTranslation();
+  const prepaymentTag = t("amortization.prepaymentTag");
   return (
     <>
       <div className="flex flex-wrap gap-x-6 gap-y-1 text-sm">
@@ -150,32 +183,18 @@ function PreviewBody({
           </thead>
           <tbody>
             {data.rows.map((row) => (
-              <tr
+              <PreviewRow
                 key={`${row.seq}-${row.due_date}-${row.event_id ?? ""}`}
-                className={cn(
-                  "border-t border-border/40",
-                  row.is_prepayment && "bg-primary/10 font-medium text-primary"
-                )}
-              >
-                <td className="px-2 py-1 text-left">
-                  {row.seq}
-                  {row.is_prepayment && (
-                    <span className="ml-1 text-xs">{t("amortization.prepaymentTag")}</span>
-                  )}
-                </td>
-                <td className="px-2 py-1 text-left font-mono">{row.due_date}</td>
-                <td className="px-2 py-1 font-mono">{formatAmount(row.principal)}</td>
-                <td className="px-2 py-1 font-mono">{formatAmount(row.interest)}</td>
-                <td className="px-2 py-1 font-mono">{formatAmount(row.payment)}</td>
-                <td className="px-2 py-1 font-mono">{formatAmount(row.balance_after)}</td>
-              </tr>
+                row={row}
+                prepaymentTag={prepaymentTag}
+              />
             ))}
           </tbody>
         </table>
       </div>
     </>
   );
-}
+});
 
 // Prepayment + rate-change forms for a saved schedule. Dates are constrained to
 // the previewed payment dates; the backend still 422s anything on or before the
