@@ -76,7 +76,7 @@ def run_due_reminders(session: Session, cfg: AppConfig, now: datetime.datetime) 
                     # String values mean the send never reached the service (e.g.
                     # invalid URL / exception) and should be retried next tick.
                     session.add(NotificationLog(occurrence_id=occ.id, channel_name=name))
-                    if ok is True:
+                    if ok:
                         sent += 1
             session.commit()
         except Exception:                       # one bad occurrence never aborts the batch

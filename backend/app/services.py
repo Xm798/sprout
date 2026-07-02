@@ -36,7 +36,8 @@ def effective_horizon(config: AppConfig, today: datetime.date) -> datetime.date:
     reminder lead window (when notifications are on), whichever is larger. Keeps
     reminded occurrences visible/confirmable and safe from schedule-edit pruning."""
     lead = config.notify_lead_days if config.notify_enabled else 0
-    return today + datetime.timedelta(days=max(config.lookahead_days, lead))
+    return max(materialization_horizon(config, today),
+               today + datetime.timedelta(days=lead))
 
 
 def _delete_occurrences(session: Session, occurrences: list[Occurrence]) -> None:
@@ -451,9 +452,10 @@ def update_schedule(
     # A pending the new rule no longer produces is stale — drop it in one batch.
     # Skipped rows are explicit user decisions and stay, like confirmed ones.
     stale = [occ for occ in unconfirmed if occ.status == "pending" and occ.due_date not in valid_dates]
+    stale_ids = {o.id for o in stale}
     _delete_occurrences(session, stale)
     for occ in unconfirmed:
-        if occ.status == "pending" and occ.due_date not in valid_dates:
+        if occ.id in stale_ids:
             continue
         if not occ.override_amounts:
             continue

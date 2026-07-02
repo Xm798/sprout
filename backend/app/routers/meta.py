@@ -105,21 +105,24 @@ def put_notifications(payload: NotificationSettings,
         raise HTTPException(422, "notify_lead_days must be >= 0")
 
     # F8: reject duplicate channel names in the payload
-    names = [ch.name for ch in payload.notify_channels]
-    if len(names) != len(set(names)):
+    if len(payload.notify_channels) != len({ch.name for ch in payload.notify_channels}):
         raise HTTPException(422, "channel names must be unique")
 
     cfg = _config(session)
-    existing = {c["name"]: c.get("url", "") for c in (cfg.notify_channels or [])}
-    # F6: build an id-keyed lookup so a rename (new name, masked URL, same id) resolves correctly
-    existing_by_id = {c["id"]: c.get("url", "") for c in (cfg.notify_channels or []) if c.get("id")}
+    existing: dict[str, str] = {}
+    existing_by_id: dict[str, str] = {}
+    # F6: build id- and name-keyed lookups so a rename (new name, masked URL, same id) resolves correctly
+    for c in (cfg.notify_channels or []):
+        existing[c["name"]] = c.get("url", "")
+        if c.get("id"):
+            existing_by_id[c["id"]] = c.get("url", "")
     resolved: list[dict] = []
     for ch in payload.notify_channels:
         if not ch.name:
             raise HTTPException(422, "channel name required")
         if ch.url == MASK:
             # Prefer id-based lookup; fall back to name lookup for older payloads without an id
-            url = existing_by_id.get(ch.id or "", "") or existing.get(ch.name, "")
+            url = existing_by_id.get(ch.id, "") or existing.get(ch.name, "")
         else:
             url = ch.url
         if not url:

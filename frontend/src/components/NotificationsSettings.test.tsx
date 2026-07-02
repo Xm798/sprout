@@ -33,7 +33,7 @@ function wrap(ui: React.ReactNode) {
 }
 
 beforeEach(() => {
-  mockNotificationsData = { ...baseData, notify_channels: [] };
+  mockNotificationsData = { ...baseData };
   mockUpdateFn.mockResolvedValue(baseData);
 });
 
