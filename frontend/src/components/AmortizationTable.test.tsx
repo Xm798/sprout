@@ -1,5 +1,7 @@
-import { screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { MemoryRouter } from "react-router-dom";
 import { afterEach, expect, test, vi } from "vitest";
 
 import { AmortizationTable } from "./AmortizationTable";
@@ -61,10 +63,49 @@ const PREVIEW: AmortizationResult = {
   payoff_date: "2026-04-15",
 };
 
-afterEach(() => vi.clearAllMocks());
+afterEach(() => {
+  vi.clearAllMocks();
+  vi.useRealTimers();
+});
 
 const previewMock = api.previewAmortization as ReturnType<typeof vi.fn>;
 const addMock = api.addScheduleEvent as ReturnType<typeof vi.fn>;
+
+test("debounces preview requests while loan fields are being typed", () => {
+  vi.useFakeTimers();
+  previewMock.mockResolvedValue(PREVIEW);
+
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const view = (principal: string) => (
+    <QueryClientProvider client={qc}>
+      <MemoryRouter>
+        <AmortizationTable
+          loan={{ ...LOAN, principal }}
+          anchorDate="2026-01-15"
+          intervalCount={1}
+          currency="USD"
+        />
+      </MemoryRouter>
+    </QueryClientProvider>
+  );
+
+  // Start empty (query disabled), then simulate typing "240000" digit by digit,
+  // advancing less than the debounce window between each "keystroke".
+  const { rerender } = render(view(""));
+  for (const partial of ["2", "24", "240", "2400", "24000", "240000"]) {
+    rerender(view(partial));
+    act(() => vi.advanceTimersByTime(50));
+  }
+
+  // No request yet: every keystroke reset the pending debounce timer.
+  expect(previewMock).not.toHaveBeenCalled();
+
+  // Once typing settles (300ms debounce), a single request fires with the
+  // final value.
+  act(() => vi.advanceTimersByTime(300));
+  expect(previewMock).toHaveBeenCalledTimes(1);
+  expect(previewMock.mock.calls[0][0].loan.principal).toBe("240000");
+});
 
 test("renders schedule rows plus the total interest and payoff date", async () => {
   previewMock.mockResolvedValue(PREVIEW);
