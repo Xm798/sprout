@@ -25,9 +25,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { cn, errorMessage, formatAmount, formatDate, percentToDecimal } from "@/lib/utils";
 
 const PREPAY_MODES: PrepaymentMode[] = ["shorten_term", "reduce_payment"];
+
+// Debounce loan-field edits before they reach the query key so typing a
+// principal/rate/term fires one preview request instead of one per keystroke.
+const PREVIEW_DEBOUNCE_MS = 300;
 
 interface AmortizationTableProps {
   loan: LoanData; // annual_rate is already a decimal string
@@ -62,11 +67,14 @@ export function AmortizationTable({
   // re-runs the preview immediately.
   const [events, setEvents] = useState<AmortizationEvent[]>(initialEvents);
 
-  const enabled = loanReady(loan, anchorDate);
   const body = { loan, anchor_date: anchorDate, interval_count: intervalCount, events };
-  const preview = usePreviewAmortization(body, enabled);
+  // The query runs off the debounced body so mid-typing values never hit the
+  // network; the empty-state hint still uses the live values for snappy UX.
+  const debouncedBody = useDebouncedValue(body, PREVIEW_DEBOUNCE_MS);
+  const queryReady = loanReady(debouncedBody.loan, debouncedBody.anchor_date);
+  const preview = usePreviewAmortization(debouncedBody, queryReady);
 
-  if (!enabled) {
+  if (!loanReady(loan, anchorDate)) {
     return (
       <p className="text-sm text-muted-foreground">
         {t("amortization.fillToPreview")}
