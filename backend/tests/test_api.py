@@ -575,6 +575,78 @@ def test_amortization_preview_endpoint(client):
     assert isinstance(body["total_interest"], str)
 
 
+def test_amortization_preview_with_events(client):
+    """Preview with a valid prepayment + rate-change: the prepayment row appears,
+    the payoff shortens below the base term, and total interest matches the golden."""
+    r = client.post("/api/loans/amortization", json={
+        "loan": {"principal": "100000", "annual_rate": "0.05",
+                 "term_count": 360, "method": "equal_payment"},
+        "anchor_date": "2026-01-15",
+        "interval_count": 1,
+        "events": [
+            {"id": "p1", "kind": "prepayment", "date": "2027-01-15",
+             "amount": "20000", "mode": "shorten_term"},
+            {"id": "r1", "kind": "rate_change", "date": "2028-01-15",
+             "annual_rate": "0.06"},
+        ],
+    })
+    assert r.status_code == 200, r.text
+    body = r.json()
+    prepay_rows = [row for row in body["rows"] if row["is_prepayment"]]
+    assert len(prepay_rows) == 1
+    assert prepay_rows[0]["event_id"] == "p1"
+    regular_rows = [row for row in body["rows"] if not row["is_prepayment"]]
+    assert len(regular_rows) < 360  # shortened by the prepayment
+    assert body["rows"][-1]["balance_after"] == "0.00"
+    assert body["total_interest"] == "57073.02"
+
+
+def test_amortization_preview_off_payment_date_event_422(client):
+    r = client.post("/api/loans/amortization", json={
+        "loan": {"principal": "100000", "annual_rate": "0.05",
+                 "term_count": 360, "method": "equal_payment"},
+        "anchor_date": "2026-01-15",
+        "interval_count": 1,
+        "events": [{"id": "p1", "kind": "prepayment", "date": "2026-02-20",
+                    "amount": "5000", "mode": "shorten_term"}],
+    })
+    assert r.status_code == 422, r.text
+
+
+def test_amortization_preview_negative_prepayment_422(client):
+    r = client.post("/api/loans/amortization", json={
+        "loan": {"principal": "100000", "annual_rate": "0.05",
+                 "term_count": 360, "method": "equal_payment"},
+        "anchor_date": "2026-01-15",
+        "interval_count": 1,
+        "events": [{"id": "p1", "kind": "prepayment", "date": "2026-02-15",
+                    "amount": "-50000", "mode": "shorten_term"}],
+    })
+    assert r.status_code == 422, r.text
+
+
+def test_amortization_preview_unknown_kind_422(client):
+    r = client.post("/api/loans/amortization", json={
+        "loan": {"principal": "100000", "annual_rate": "0.05",
+                 "term_count": 360, "method": "equal_payment"},
+        "anchor_date": "2026-01-15",
+        "interval_count": 1,
+        "events": [{"id": "e1", "kind": "bogus", "date": "2026-02-15"}],
+    })
+    assert r.status_code == 422, r.text
+
+
+def test_amortization_preview_oversized_term_count_422(client):
+    r = client.post("/api/loans/amortization", json={
+        "loan": {"principal": "100000", "annual_rate": "0.05",
+                 "term_count": 100000000, "method": "equal_payment"},
+        "anchor_date": "2026-01-15",
+        "interval_count": 1,
+        "events": [],
+    })
+    assert r.status_code == 422, r.text
+
+
 def test_add_event_rejects_on_or_before_confirmed_boundary(client):
     # Create a 360-month loan with anchor_date 2026-01-15.
     sid = client.post("/api/schedules", json=new_loan_payload()).json()["id"]

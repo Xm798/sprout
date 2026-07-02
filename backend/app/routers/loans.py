@@ -22,12 +22,16 @@ class AmortizationPreviewRequest(BaseModel):
 def amortization_preview(body: AmortizationPreviewRequest) -> dict:
     """Stateless amortization preview — no persistence."""
     try:
+        if not 1 <= body.interval_count <= 12:
+            raise ValueError("interval_count must be between 1 and 12")
         loan_data = {k: v for k, v in body.loan.items() if k in _LOAN_TERM_KEYS}
         terms = LoanTerms(
             **loan_data,
             start_date=body.anchor_date,
             interval_months=body.interval_count,
         )
+        if not 1 <= terms.term_count <= 1200:
+            raise ValueError("term_count must be between 1 and 1200")
         events = [Event(**e) for e in body.events]
         rows = amortize(terms, events)
     except DegenerateLoan as exc:

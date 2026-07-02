@@ -12,7 +12,7 @@ from app.models import Schedule, Occurrence, ScheduleCreate
 from app.due_engine import compute_due_dates
 from app.bean_format import format_transaction, apply_beanfmt
 from app.postings import Posting, parse_postings, dump_postings, validate_postings, validate_overrides, struct_key
-from app.loan import amortize, LoanTerms, Event, validate_terms, DegenerateLoan
+from app.loan import amortize, LoanTerms, Event, validate_terms, validate_event_fields, DegenerateLoan
 from app.ledger import (
     ConflictError,  # noqa: F401  re-exported; routers reference services.ConflictError
     find_transaction,
@@ -145,6 +145,10 @@ def add_loan_event(
         raise LookupError(f"schedule {schedule_id} not found")
     if sch.kind != "loan":
         raise ValueError("events are only supported for loan schedules")
+
+    validate_event_fields(
+        event.get("kind"), event.get("amount"), event.get("mode"), event.get("annual_rate")
+    )
 
     event_date = event["date"]
     # Payment dates are the regular (non-prepayment) due dates of the current table.
@@ -655,6 +659,9 @@ def validate_loan(payload: ScheduleCreate) -> list[str]:
     if payload.interval_unit != "month":
         errors.append("loan schedules must use interval_unit='month'")
 
+    if not 1 <= payload.interval_count <= 12:
+        errors.append("interval_count must be between 1 and 12")
+
     loan = payload.loan
 
     try:
@@ -675,6 +682,8 @@ def validate_loan(payload: ScheduleCreate) -> list[str]:
         term_count = int(loan.get("term_count", 0))
         if term_count <= 0:
             errors.append("term_count must be > 0")
+        elif term_count > 1200:
+            errors.append("term_count must be <= 1200")
     except Exception:
         errors.append("term_count must be a valid integer")
 
