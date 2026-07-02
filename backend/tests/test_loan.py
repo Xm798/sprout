@@ -147,10 +147,23 @@ def test_rate_change_reprices_and_zeroes():
     assert len(regular) == 360
     assert rows[-1].balance_after == Decimal("0.00")
     before = [r for r in regular if r.due_date < date(2028, 1, 1)][-1]
+    reset = [r for r in regular if r.due_date == date(2028, 1, 1)][0]
     # The reset-date row still uses the OLD rate (interest accrued over the prior month);
     # the new rate takes effect on the NEXT period.
     nxt = [r for r in regular if r.due_date > date(2028, 1, 1)][0]
     assert nxt.payment > before.payment              # higher rate -> higher payment
+
+    # Pin the repricing boundary so a wrong convention (new rate on the reset row,
+    # or old rate lingering afterwards) is caught, not just the coarse inequality.
+    old_r = Decimal("0.0485") / 12
+    new_r = Decimal("0.0560") / 12
+    # Reset row: interest is OLD rate on the pre-reset balance; payment unchanged.
+    assert reset.interest == money(before.balance_after * old_r)
+    assert reset.interest == Decimal("3916.11")
+    assert reset.payment == before.payment
+    # Following row: NEW rate over the full period on the post-reset balance.
+    assert nxt.interest == money(reset.balance_after * new_r)
+    assert nxt.interest == Decimal("4515.34")
 
 
 def test_stacked_rate_changes_zero_out():
@@ -173,11 +186,13 @@ def test_rate_change_hitting_degenerate_is_rejected():
         amortize(terms, ev)
 
 
-def test_prepayment_interest_charged_on_pre_event_balance():
-    """A same-date prepayment must NOT lower the regular installment's interest."""
+@pytest.mark.parametrize("method", ["equal_payment", "equal_principal"])
+def test_prepayment_interest_charged_on_pre_event_balance(method):
+    """A same-date prepayment must NOT lower the regular installment's interest,
+    under either amortization method."""
     from app.loan import amortize
     terms = LoanTerms(principal=Decimal("1000000"), annual_rate=Decimal("0.0485"),
-                      term_count=360, method="equal_payment", start_date=date(2026, 1, 1))
+                      term_count=360, method=method, start_date=date(2026, 1, 1))
     D = date(2027, 1, 1)  # 13th payment date — a real payment date
     ev = [Event(id="p1", kind="prepayment", date=D,
                 amount=Decimal("200000"), mode="shorten_term")]
