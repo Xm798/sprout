@@ -4,8 +4,6 @@ import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import NotificationsSettings from "./NotificationsSettings";
 
-const MASKED = "••••";
-
 const baseData = {
   notify_enabled: false,
   notify_lead_days: 0,
@@ -60,34 +58,23 @@ describe("NotificationsSettings", () => {
     });
   });
 
-  // F9: after a successful save, URL inputs show the masked value from the server
-  it("re-seeds URL inputs with the masked value after save", async () => {
-    // Seed the form with a channel that already has a URL.
-    mockNotificationsData = {
-      ...baseData,
-      notify_channels: [{ id: "abc", name: "ios", url: "bark://h/secret", enabled: true }],
-    };
-    // The save response returns the masked version.
-    const maskedResponse = {
-      ...baseData,
-      notify_channels: [{ id: "abc", name: "ios", url: MASKED, enabled: true }],
-    };
-    mockUpdateFn.mockResolvedValueOnce(maskedResponse);
+  // URLs are no longer masked: the input keeps the plaintext value after save.
+  it("keeps the plaintext URL visible after save", async () => {
+    const channels = [{ id: "abc", name: "ios", url: "bark://h/secret", enabled: true }];
+    mockNotificationsData = { ...baseData, notify_channels: channels };
+    mockUpdateFn.mockResolvedValueOnce({ ...baseData, notify_channels: channels });
 
     render(wrap(<NotificationsSettings />));
 
-    // Initially shows the plaintext URL (as seeded).
     await waitFor(() => {
       expect(screen.getByDisplayValue("bark://h/secret")).toBeInTheDocument();
     });
 
-    // Click Save.
     await userEvent.click(screen.getByRole("button", { name: /^save$/i }));
 
-    // After save, the URL input should show the mask, not the original plaintext.
+    // Still plaintext — nothing masked.
     await waitFor(() => {
-      expect(screen.getByDisplayValue(MASKED)).toBeInTheDocument();
-      expect(screen.queryByDisplayValue("bark://h/secret")).not.toBeInTheDocument();
+      expect(screen.getByDisplayValue("bark://h/secret")).toBeInTheDocument();
     });
   });
 });

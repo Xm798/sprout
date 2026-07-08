@@ -982,46 +982,34 @@ def test_put_notifications_validates_time_and_tz(client):
     assert bad_tz.status_code == 422
 
 
-def test_put_then_get_masks_urls(client):
+def test_put_then_get_returns_urls_in_clear(client):
     r = client.put("/api/config/notifications", json={
         "notify_enabled": True, "notify_lead_days": 2, "notify_time": "08:00",
         "notify_timezone": "UTC",
         "notify_channels": [{"name": "ios", "url": "bark://h/secret", "enabled": True}]})
     assert r.status_code == 200
     got = client.get("/api/config/notifications").json()
-    assert got["notify_channels"][0]["url"] == "••••"      # masked on read
+    assert got["notify_channels"][0]["url"] == "bark://h/secret"   # no masking
     assert got["notify_timezone"] == "UTC"
 
 
-def test_put_with_masked_url_keeps_stored_url(client):
-    client.put("/api/config/notifications", json={
-        "notify_enabled": True, "notify_lead_days": 2, "notify_time": "08:00",
-        "notify_timezone": "UTC",
-        "notify_channels": [{"name": "ios", "url": "bark://h/secret", "enabled": True}]})
-    # Re-save with masked url (user only toggled enabled) — stored url must survive.
-    client.put("/api/config/notifications", json={
-        "notify_enabled": True, "notify_lead_days": 2, "notify_time": "08:00",
-        "notify_timezone": "UTC",
-        "notify_channels": [{"name": "ios", "url": "••••", "enabled": False}]})
-    from app.db import get_config
-    # Inspect raw stored value through a fresh request-independent read.
-    cfg = client.get("/api/config/notifications").json()
-    assert cfg["notify_channels"][0]["enabled"] is False
-    # Send a test and confirm the real (unmasked) url is used.
+def test_test_endpoint_uses_posted_channels_without_saving(client):
+    # The test endpoint tests whatever the client sends — no save required, no DB lookup.
     from unittest.mock import patch
     with patch("app.routers.meta.send_to_channels", return_value={"ios": True}) as send:
-        client.post("/api/config/notifications/test", json={"channel_name": "ios"})
-    assert send.call_args.args[0][0]["url"] == "bark://h/secret"
+        r = client.post("/api/config/notifications/test", json={
+            "channels": [{"name": "ios", "url": "bark://h/unsaved"}]})
+    assert r.status_code == 200 and r.json() == {"ios": True}
+    assert send.call_args.args[0][0]["url"] == "bark://h/unsaved"
+    # Nothing was persisted by the test call.
+    assert client.get("/api/config/notifications").json()["notify_channels"] == []
 
 
 def test_test_endpoint_returns_per_channel_results(client):
-    client.put("/api/config/notifications", json={
-        "notify_enabled": True, "notify_lead_days": 0, "notify_time": "08:00",
-        "notify_timezone": "UTC",
-        "notify_channels": [{"name": "ios", "url": "bark://h/k", "enabled": True}]})
     from unittest.mock import patch
     with patch("app.routers.meta.send_to_channels", return_value={"ios": True}):
-        r = client.post("/api/config/notifications/test", json={})
+        r = client.post("/api/config/notifications/test", json={
+            "channels": [{"name": "ios", "url": "bark://h/k"}]})
     assert r.status_code == 200 and r.json() == {"ios": True}
 
 
@@ -1041,26 +1029,24 @@ def test_duplicate_channel_names_rejected(client):
     assert cfg["notify_channels"] == []
 
 
-# ── F6: rename a channel (masked URL, same id) keeps the stored URL ────────────
+# ── F6: rename a channel (same id) keeps the stable id ─────────────────────────
 
-def test_rename_channel_via_id_with_masked_url(client):
+def test_rename_channel_via_id_keeps_id(client):
     # First save with a real URL and a stable id.
     chan_id = "abc123"
     client.put("/api/config/notifications", json={
         "notify_enabled": True, "notify_lead_days": 0, "notify_time": "08:00",
         "notify_timezone": "UTC",
         "notify_channels": [{"id": chan_id, "name": "old-name", "url": "bark://h/secret", "enabled": True}]})
-    # Re-save: rename to "new-name" but keep URL masked, same id.
+    # Re-save: rename to "new-name", same id, new URL.
     r = client.put("/api/config/notifications", json={
         "notify_enabled": True, "notify_lead_days": 0, "notify_time": "08:00",
         "notify_timezone": "UTC",
-        "notify_channels": [{"id": chan_id, "name": "new-name", "url": "••••", "enabled": True}]})
+        "notify_channels": [{"id": chan_id, "name": "new-name", "url": "bark://h/updated", "enabled": True}]})
     assert r.status_code == 200
-    # Confirm the stored URL survived via the test endpoint.
-    from unittest.mock import patch
-    with patch("app.routers.meta.send_to_channels", return_value={"new-name": True}) as send:
-        client.post("/api/config/notifications/test", json={"channel_name": "new-name"})
-    assert send.call_args.args[0][0]["url"] == "bark://h/secret"
+    got = client.get("/api/config/notifications").json()["notify_channels"][0]
+    assert got["id"] == chan_id and got["name"] == "new-name"
+    assert got["url"] == "bark://h/updated"
 
 
 def test_idless_payload_reuses_existing_channel_id(client):
@@ -1076,7 +1062,7 @@ def test_idless_payload_reuses_existing_channel_id(client):
     client.put("/api/config/notifications", json={
         "notify_enabled": True, "notify_lead_days": 0, "notify_time": "08:00",
         "notify_timezone": "UTC",
-        "notify_channels": [{"name": "ios", "url": "••••", "enabled": False}]})
+        "notify_channels": [{"name": "ios", "url": "bark://h/k", "enabled": False}]})
     got = client.get("/api/config/notifications").json()["notify_channels"][0]
     assert got["id"] == original_id and got["enabled"] is False
 
@@ -1091,17 +1077,13 @@ def test_get_notifications_includes_channel_id(client):
     assert got["notify_channels"][0]["id"] == chan_id
 
 
-# ── F7: empty channel_name must return 404, not broadcast to all ───────────────
+# ── F7: an empty channel list is a no-op (200, {}), never a broadcast ──────────
 
-def test_empty_channel_name_returns_404(client):
-    client.put("/api/config/notifications", json={
-        "notify_enabled": True, "notify_lead_days": 0, "notify_time": "08:00",
-        "notify_timezone": "UTC",
-        "notify_channels": [{"name": "ios", "url": "bark://h/k", "enabled": True}]})
+def test_empty_channels_is_noop(client):
     from unittest.mock import patch
     with patch("app.routers.meta.send_to_channels") as send:
-        r = client.post("/api/config/notifications/test", json={"channel_name": ""})
-    assert r.status_code == 404
+        r = client.post("/api/config/notifications/test", json={"channels": []})
+    assert r.status_code == 200 and r.json() == {}
     send.assert_not_called()
 
 

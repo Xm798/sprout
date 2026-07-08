@@ -10,10 +10,8 @@ from app.db import get_session, get_config as _config
 from app.config import AppConfig
 from app.ledger import load_accounts, load_currencies
 from app.notify.channels import send_to_channels
-from app.notify.reminders import enabled_channels
 from app.writer import resolve_root
 
-MASK = "••••"
 _TIME_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 
 
@@ -32,12 +30,17 @@ class NotificationSettings(BaseModel):
     notify_channels: list[Channel]
 
 
+class TestChannel(BaseModel):
+    name: str
+    url: str
+
+
 class TestBody(BaseModel):
-    channel_name: str | None = None
+    channels: list[TestChannel] = []
 
 
-def _masked(cfg: AppConfig) -> dict:
-    chans = [{"id": c.get("id", ""), "name": c["name"], "url": MASK if c.get("url") else "",
+def _serialize(cfg: AppConfig) -> dict:
+    chans = [{"id": c.get("id", ""), "name": c["name"], "url": c.get("url", ""),
               "enabled": c.get("enabled", True)} for c in (cfg.notify_channels or [])]
     return {"notify_enabled": cfg.notify_enabled, "notify_lead_days": cfg.notify_lead_days,
             "notify_time": cfg.notify_time, "notify_timezone": cfg.notify_timezone,
@@ -88,7 +91,7 @@ def update_config(payload: AppConfig, session: Session = Depends(get_session)) -
 
 @router.get("/config/notifications")
 def get_notifications(session: Session = Depends(get_session)) -> dict:
-    return _masked(_config(session))
+    return _serialize(_config(session))
 
 
 @router.put("/config/notifications")
@@ -109,31 +112,21 @@ def put_notifications(payload: NotificationSettings,
         raise HTTPException(422, "channel names must be unique")
 
     cfg = _config(session)
-    existing: dict[str, str] = {}
-    existing_by_id: dict[str, str] = {}
-    id_by_name: dict[str, str] = {}
-    # F6: build id- and name-keyed lookups so a rename (new name, masked URL, same id) resolves correctly
-    for c in (cfg.notify_channels or []):
-        existing[c["name"]] = c.get("url", "")
-        if c.get("id"):
-            existing_by_id[c["id"]] = c.get("url", "")
-            id_by_name[c["name"]] = c["id"]
+    # Name -> existing id, so an id-less payload reattaches instead of minting a new id.
+    id_by_name: dict[str, str] = {
+        c["name"]: c["id"] for c in (cfg.notify_channels or []) if c.get("id")
+    }
     resolved: list[dict] = []
     for ch in payload.notify_channels:
         if not ch.name:
             raise HTTPException(422, "channel name required")
-        if ch.url == MASK:
-            # Prefer id-based lookup; fall back to name lookup for older payloads without an id
-            url = existing_by_id.get(ch.id, "") or existing.get(ch.name, "")
-        else:
-            url = ch.url
-        if not url:
+        if not ch.url:
             raise HTTPException(422, f"channel {ch.name} needs a URL")
         # Keep the stable id: it is the reminder-dedup key, so an id-less payload
         # (hand-written client) must reattach to the existing channel by name
         # rather than mint a new identity and re-fire every pending reminder.
         chan_id = ch.id or id_by_name.get(ch.name) or uuid.uuid4().hex
-        resolved.append({"id": chan_id, "name": ch.name, "url": url, "enabled": ch.enabled})
+        resolved.append({"id": chan_id, "name": ch.name, "url": ch.url, "enabled": ch.enabled})
 
     cfg.notify_enabled = payload.notify_enabled
     cfg.notify_lead_days = payload.notify_lead_days
@@ -142,17 +135,14 @@ def put_notifications(payload: NotificationSettings,
     cfg.notify_channels = resolved
     session.add(cfg)
     session.commit()
-    return _masked(cfg)
+    return _serialize(cfg)
 
 
 @router.post("/config/notifications/test")
-def test_notifications(body: TestBody, session: Session = Depends(get_session)) -> dict:
-    cfg = _config(session)
-    # F7: None means "test all"; any explicit string (even "") means "test just this one"
-    if body.channel_name is not None:
-        chans = [c for c in (cfg.notify_channels or []) if c.get("url") and c["name"] == body.channel_name]
-    else:
-        chans = enabled_channels(cfg)
+def test_notifications(body: TestBody) -> dict:
+    # Test whatever the client sends, unsaved — no DB lookup. The frontend passes
+    # the current form values, so a channel can be tested before it is saved.
+    chans = [{"name": c.name, "url": c.url} for c in body.channels if c.url]
     if not chans:
-        raise HTTPException(404, "no matching channel")
+        return {}
     return send_to_channels(chans, "Sprout test", "Notifications are working ✅")

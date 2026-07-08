@@ -9,6 +9,7 @@ import type {
   PreviewBody,
   ScheduleCreate,
   ScheduleEventBody,
+  TestChannel,
 } from "./types";
 
 export const qk = {
@@ -258,5 +259,7 @@ export function useUpdateNotifications() {
 }
 
 export function useTestNotification() {
-  return useMutation({ mutationFn: (name?: string) => api.testNotification(name) });
+  return useMutation({
+    mutationFn: (channels: TestChannel[]) => api.testNotification(channels),
+  });
 }

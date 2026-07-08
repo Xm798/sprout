@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Save, TestTube2, Trash2, Plus } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -8,7 +8,7 @@ import {
   useUpdateNotifications,
   useTestNotification,
 } from "../api/hooks";
-import type { NotificationChannel, NotificationSettings } from "../api/types";
+import type { NotificationChannel, NotificationSettings, TestChannel } from "../api/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -19,6 +19,22 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+
+const BROWSER_TZ = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+
+// supportedValuesOf is ES2022; cast so the build works on older TS libs, and
+// fall back to a minimal list on the rare runtime that lacks it.
+const TIMEZONES: string[] =
+  (Intl as { supportedValuesOf?: (key: string) => string[] }).supportedValuesOf?.(
+    "timeZone"
+  ) ?? ["UTC", BROWSER_TZ];
 
 export default function NotificationsSettings() {
   const { t } = useTranslation();
@@ -31,6 +47,12 @@ export default function NotificationsSettings() {
   useEffect(() => {
     if (data && !form) setForm(data);
   }, [data]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // The known IANA zones, plus the stored value if it's an alias not in the list.
+  const timezoneOptions = useMemo(() => {
+    const current = form?.notify_timezone;
+    return current && !TIMEZONES.includes(current) ? [current, ...TIMEZONES] : TIMEZONES;
+  }, [form?.notify_timezone]);
 
   if (!form) return null;
 
@@ -59,7 +81,6 @@ export default function NotificationsSettings() {
 
   const save = async () => {
     try {
-      // F9: re-seed from the masked response so URL inputs show "••••" after saving
       const saved = await update.mutateAsync(form);
       setForm(saved);
       toast.success(t("notify.saved"));
@@ -68,9 +89,14 @@ export default function NotificationsSettings() {
     }
   };
 
-  const runTest = async (name?: string) => {
+  const toTestChannel = (c: NotificationChannel): TestChannel => ({
+    name: c.name,
+    url: c.url,
+  });
+
+  const runTest = async (channels: TestChannel[]) => {
     try {
-      const res = await test.mutateAsync(name);
+      const res = await test.mutateAsync(channels);
       const lines = Object.entries(res as Record<string, unknown>).map(
         ([n, v]) => `${n}: ${v === true ? "✅" : String(v)}`
       );
@@ -124,14 +150,21 @@ export default function NotificationsSettings() {
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="notify_timezone">{t("notify.timezone")}</Label>
-            <Input
-              id="notify_timezone"
+            <Select
               value={form.notify_timezone}
-              placeholder="UTC"
-              onChange={(e) =>
-                setForm({ ...form, notify_timezone: e.target.value })
-              }
-            />
+              onValueChange={(v) => setForm({ ...form, notify_timezone: v })}
+            >
+              <SelectTrigger id="notify_timezone" aria-label={t("notify.timezone")}>
+                <SelectValue placeholder="UTC" />
+              </SelectTrigger>
+              <SelectContent>
+                {timezoneOptions.map((tz) => (
+                  <SelectItem key={tz} value={tz}>
+                    {tz}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
         </div>
 
@@ -162,7 +195,7 @@ export default function NotificationsSettings() {
                 variant="outline"
                 size="sm"
                 disabled={!c.name || !c.url}
-                onClick={() => runTest(c.name)}
+                onClick={() => runTest([toTestChannel(c)])}
               >
                 <TestTube2 className="h-4 w-4" />
                 {t("notify.test")}
@@ -194,7 +227,13 @@ export default function NotificationsSettings() {
           <Button
             type="button"
             variant="outline"
-            onClick={() => runTest()}
+            onClick={() =>
+              runTest(
+                form.notify_channels
+                  .filter((c) => c.enabled && c.name && c.url)
+                  .map(toTestChannel)
+              )
+            }
           >
             <TestTube2 className="h-4 w-4" />
             {t("notify.testAll")}

@@ -13,6 +13,7 @@ import type {
   Schedule,
   ScheduleCreate,
   ScheduleEventBody,
+  TestChannel,
   WrittenTransaction,
 } from "./types";
 
@@ -130,8 +131,8 @@ export const api = {
     http<NotificationSettings>("/config/notifications", {
       method: "PUT", body: JSON.stringify(body),
     }),
-  testNotification: (name?: string) =>
+  testNotification: (channels: TestChannel[]) =>
     http<Record<string, boolean | string>>("/config/notifications/test", {
-      method: "POST", body: JSON.stringify({ channel_name: name ?? null }),
+      method: "POST", body: JSON.stringify({ channels }),
     }),
 };

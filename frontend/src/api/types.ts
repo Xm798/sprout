@@ -164,9 +164,12 @@ export type PreviewBody = ConfirmBody;
 export interface NotificationChannel {
   id?: string;        // stable per-channel identifier; generated client-side on add
   name: string;
-  url: string;        // "••••" when masked from the server
+  url: string;        // apprise URL, e.g. bark://host/key — stored and returned in the clear
   enabled: boolean;
 }
+
+// Payload for the test endpoint: only the fields a stateless test call needs.
+export type TestChannel = Pick<NotificationChannel, "name" | "url">;
 
 export interface NotificationSettings {
   notify_enabled: boolean;
