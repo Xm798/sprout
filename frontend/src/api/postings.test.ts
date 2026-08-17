@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { analyzeFlow } from "./postings";
+import { analyzeFlow, balanceGap } from "./postings";
 import type { Posting } from "./types";
 
 const p = (
@@ -144,5 +144,30 @@ describe("analyzeFlow", () => {
   test("empty / undefined postings fall back safely", () => {
     expect(analyzeFlow(undefined).amount).toBeUndefined();
     expect(analyzeFlow([]).sources).toEqual([]);
+  });
+});
+
+describe("balanceGap", () => {
+  test("two explicit legs, override one: gap = the resulting off-balance amount", () => {
+    const postings = [p("r1", "Expenses:Rent", "3000"), p("r2", "Assets:Bank", "-3000")];
+    expect(balanceGap(postings, { r1: "3100" })).toEqual({ amount: 100, currency: "CNY" });
+  });
+
+  test("two explicit legs, override both to balance: undefined", () => {
+    const postings = [p("r1", "Expenses:Rent", "3000"), p("r2", "Assets:Bank", "-3000")];
+    expect(balanceGap(postings, { r1: "3100", r2: "-3100" })).toBeUndefined();
+  });
+
+  test("one blank leg: not checkable regardless of override", () => {
+    const postings = [p("a", "Expenses:Food", "80"), p("b", "Assets:Bank:3577", null)];
+    expect(balanceGap(postings, { a: "90" })).toBeUndefined();
+  });
+
+  test("mixed currencies: not checkable", () => {
+    const postings = [
+      p("a", "Expenses:Food", "80", "CNY"),
+      p("b", "Assets:Bank:3577", "-80", "USD"),
+    ];
+    expect(balanceGap(postings, {})).toBeUndefined();
   });
 });

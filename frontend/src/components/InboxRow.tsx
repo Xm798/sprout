@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
 
 import { useConfirm, useMarkPaidOutside, usePreview, useSkip } from "@/api/hooks";
-import { analyzeFlow, headlineDisplay, headlineLeg } from "@/api/postings";
+import { analyzeFlow, balanceGap, headlineDisplay } from "@/api/postings";
 import type { ConfirmBody, Occurrence, Schedule } from "@/api/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -26,7 +26,7 @@ export function InboxRow({
   const { t } = useTranslation();
   const isLoan = schedule?.kind === "loan";
   const [expanded, setExpanded] = useState(() => isLoan);
-  const [amount, setAmount] = useState("");
+  const [amounts, setAmounts] = useState<Record<string, string>>({});
   const [date, setDate] = useState("");
   const [narration, setNarration] = useState("");
 
@@ -39,20 +39,45 @@ export function InboxRow({
   const isOverdue = isLoan && occurrence.status === "pending" && occurrence.due_date < today;
 
   const name = schedule?.name ?? t("common.scheduleFallback", { id: occurrence.schedule_id });
-  // Headline = net flow of the auto-balance leg; edits in this row still tune
-  // the first amount-bearing leg.
+  // Non-empty typed amounts, keyed by posting id — shared by buildBody() and
+  // the editor's derived-placeholder flow below.
+  const typedAmounts = Object.fromEntries(Object.entries(amounts).filter(([, v]) => v));
+  // Headline = net flow of the auto-balance leg, from stored overrides only,
+  // so the collapsed headline / FlowAccounts don't jump on every keystroke.
   const flow = analyzeFlow(schedule?.postings, occurrence.override_amounts);
-  const amountLeg = headlineLeg(schedule?.postings);
-  const headlineId = amountLeg?.id;
   const { amount: baseAmount = "", currency: baseCurrency } = headlineDisplay(
     flow,
     schedule
   );
-  // The editable leg's own effective amount — distinct from the net headline.
-  const legAmount =
-    (headlineId != null ? occurrence.override_amounts[headlineId] : undefined) ??
-    amountLeg?.amount ??
-    "";
+  // In-progress typing layered on top of stored overrides — shared by the
+  // editor flow below and the balance check.
+  const effectiveOverrides = { ...occurrence.override_amounts, ...typedAmounts };
+  // Separate flow, layering in-progress typing on top of stored overrides, so
+  // a disabled leg's derived placeholder stays live while the user edits an
+  // explicit leg (e.g. typing into one leg of a 2-leg schedule updates the
+  // other leg's auto-balance placeholder immediately).
+  const editorFlow = analyzeFlow(schedule?.postings, effectiveOverrides);
+  // Every posting gets its own input, in schedule posting order — analyzeFlow
+  // groups/omits legs (e.g. its fallback mode only surfaces 1-2), so it isn't
+  // a complete leg list. Flow legs are only consulted for a derived amount to
+  // show on blank (posting.amount == null) legs.
+  const postings = schedule?.postings ?? [];
+  const editorFlowLegById = new Map(
+    [...editorFlow.sources, ...editorFlow.destinations].map((l) => [l.posting.id, l])
+  );
+  // Client-side balance check on the effective (typed-or-stored) amounts, so
+  // a partial edit of an all-explicit schedule can't be confirmed into a
+  // 422. Undefined when not checkable (a blank leg remains, mixed
+  // currencies, cost/price) or already balanced.
+  const gap = balanceGap(schedule?.postings, effectiveOverrides);
+  const unbalanced = gap !== undefined;
+  // formatAmount() forces 2 fraction digits, which would round a sub-cent gap
+  // down to "0.00" — fall back to the plain cleaned number in that case.
+  const gapAmountText = gap
+    ? Math.abs(gap.amount) >= 0.01
+      ? formatAmount(gap.amount)
+      : String(gap.amount)
+    : undefined;
   const effectiveDate = occurrence.override_date ?? occurrence.due_date;
   const fieldId = `occ-${occurrence.id}`;
 
@@ -60,8 +85,8 @@ export function InboxRow({
   // backend keeps any persisted overrides.
   function buildBody(): ConfirmBody {
     const body: ConfirmBody = {};
-    if (amount && headlineId != null) {
-      body.override_amounts = { [headlineId]: amount };
+    if (Object.keys(typedAmounts).length > 0) {
+      body.override_amounts = typedAmounts;
     }
     if (date) body.override_date = date;
     if (narration) body.override_narration = narration;
@@ -133,12 +158,17 @@ export function InboxRow({
         <Button
           size="sm"
           onClick={onConfirm}
-          disabled={confirm.isPending}
+          disabled={confirm.isPending || unbalanced}
           className="flex-1 sm:flex-none"
         >
           <Check className="h-4 w-4" />
           {t("inboxRow.confirm")}
         </Button>
+        {gap && (
+          <span className="text-xs text-destructive">
+            {t("inboxRow.unbalanced", { amount: gapAmountText, currency: gap.currency })}
+          </span>
+        )}
         {isLoan ? (
           <Button
             size="sm"
@@ -183,17 +213,39 @@ export function InboxRow({
         <div className="space-y-4 border-t border-border/60 bg-muted/30 p-4 sm:p-5">
           <div className="grid gap-3 sm:grid-cols-3">
             <div className="space-y-1.5">
-              <Label htmlFor={`${fieldId}-amount`}>
-                {t("inboxRow.amount")}{amountLeg ? ` · ${leafAccount(amountLeg.account)}` : ""}
-              </Label>
-              <Input
-                id={`${fieldId}-amount`}
-                inputMode="decimal"
-                disabled={headlineId == null}
-                placeholder={legAmount}
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-              />
+              <Label>{t("inboxRow.amount")}</Label>
+              <div className="space-y-2">
+                {postings.map((posting) => {
+                  const disabled = posting.amount == null;
+                  const legId = `${fieldId}-amount-${posting.id}`;
+                  const derivedAmount = editorFlowLegById.get(posting.id)?.amount;
+                  const placeholder = disabled
+                    ? derivedAmount != null
+                      ? String(derivedAmount)
+                      : "—"
+                    : occurrence.override_amounts[posting.id] ?? posting.amount ?? "";
+                  return (
+                    <div key={posting.id} className="space-y-1">
+                      <Label
+                        htmlFor={legId}
+                        className="text-xs font-normal text-muted-foreground"
+                      >
+                        {leafAccount(posting.account)}
+                      </Label>
+                      <Input
+                        id={legId}
+                        inputMode="decimal"
+                        disabled={disabled}
+                        placeholder={placeholder}
+                        value={amounts[posting.id] ?? ""}
+                        onChange={(e) =>
+                          setAmounts((prev) => ({ ...prev, [posting.id]: e.target.value }))
+                        }
+                      />
+                    </div>
+                  );
+                })}
+              </div>
             </div>
             <div className="space-y-1.5">
               <Label htmlFor={`${fieldId}-date`}>{t("inboxRow.date")}</Label>

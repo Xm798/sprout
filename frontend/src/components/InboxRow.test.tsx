@@ -55,16 +55,33 @@ test("confirm calls the api with an empty body by default", async () => {
   expect(api.confirm).toHaveBeenCalledWith(1, {});
 });
 
-test("editing the amount sends override_amounts keyed by the headline posting id", async () => {
+test("editing a leg sends override_amounts keyed by that leg's posting id", async () => {
   const user = userEvent.setup();
   renderWithProviders(<InboxRow occurrence={occurrence} schedule={schedule} />);
   await user.click(screen.getByRole("button", { name: /preview/i }));
-  await user.type(screen.getByLabelText(/^amount/i), "20.00");
+  await user.type(screen.getByLabelText("Subscription"), "20.00");
   await user.click(screen.getByRole("button", { name: /^confirm$/i }));
   await waitFor(() => expect(api.confirm).toHaveBeenCalledTimes(1));
   expect(api.confirm).toHaveBeenCalledWith(1, {
     override_amounts: { p1: "20.00" },
   });
+});
+
+test("blank auto-balance leg's input is disabled and shows the derived amount", async () => {
+  const user = userEvent.setup();
+  renderWithProviders(<InboxRow occurrence={occurrence} schedule={schedule} />);
+  await user.click(screen.getByRole("button", { name: /preview/i }));
+  const input = screen.getByLabelText("CreditCard");
+  expect(input).toBeDisabled();
+  expect(input).toHaveAttribute("placeholder", "-15");
+});
+
+test("typing into an explicit leg keeps the derived placeholder live", async () => {
+  const user = userEvent.setup();
+  renderWithProviders(<InboxRow occurrence={occurrence} schedule={schedule} />);
+  await user.click(screen.getByRole("button", { name: /preview/i }));
+  await user.type(screen.getByLabelText("Subscription"), "20.00");
+  expect(screen.getByLabelText("CreditCard")).toHaveAttribute("placeholder", "-20");
 });
 
 test("skip calls the api", async () => {
@@ -120,7 +137,108 @@ test("amount input placeholder shows the editable leg's own amount, not the net"
     <InboxRow occurrence={{ ...occurrence, schedule_id: 8 }} schedule={payrollSchedule} />
   );
   await user.click(screen.getByRole("button", { name: /preview/i }));
-  expect(screen.getByLabelText(/^amount/i)).toHaveAttribute("placeholder", "-10000");
+  expect(screen.getByLabelText("Salary")).toHaveAttribute("placeholder", "-10000");
+});
+
+const rentSchedule: Schedule = {
+  ...schedule,
+  id: 10,
+  name: "Rent",
+  postings: [
+    { id: "r1", account: "Expenses:Rent", amount: "3000", currency: "CNY" },
+    { id: "r2", account: "Assets:Bank", amount: "-3000", currency: "CNY" },
+  ],
+  headline_amount: "3000",
+  headline_currency: "CNY",
+};
+
+const rentOccurrence: Occurrence = {
+  id: 3, schedule_id: 10, due_date: "2026-06-15", status: "pending",
+  override_amounts: {}, override_date: null, override_narration: null,
+  written_path: null, sprout_id: "sch10-20260615", confirmed_at: null,
+};
+
+test("all-explicit legs: editing only the second leg overrides only that leg, but leaves it unbalanced", async () => {
+  const user = userEvent.setup();
+  renderWithProviders(<InboxRow occurrence={rentOccurrence} schedule={rentSchedule} />);
+  await user.click(screen.getByRole("button", { name: /preview/i }));
+  await user.type(screen.getByLabelText("Bank"), "-3100");
+  // buildBody() still keys override_amounts by only the edited leg's id —
+  // verified via the live preview request, since Confirm is now disabled
+  // (Rent 3000 + Bank -3100 doesn't balance; see the balance-check tests below).
+  await waitFor(() =>
+    expect(api.previewTransient).toHaveBeenLastCalledWith(3, {
+      override_amounts: { r2: "-3100" },
+    })
+  );
+  expect(screen.getByRole("button", { name: /^confirm$/i })).toBeDisabled();
+  expect(api.confirm).not.toHaveBeenCalled();
+});
+
+test("all-explicit legs: editing both legs overrides both", async () => {
+  const user = userEvent.setup();
+  renderWithProviders(<InboxRow occurrence={rentOccurrence} schedule={rentSchedule} />);
+  await user.click(screen.getByRole("button", { name: /preview/i }));
+  await user.type(screen.getByLabelText("Rent"), "3100");
+  await user.type(screen.getByLabelText("Bank"), "-3100");
+  await user.click(screen.getByRole("button", { name: /^confirm$/i }));
+  await waitFor(() => expect(api.confirm).toHaveBeenCalledTimes(1));
+  expect(api.confirm).toHaveBeenCalledWith(3, {
+    override_amounts: { r1: "3100", r2: "-3100" },
+  });
+});
+
+test("editing one leg of an all-explicit schedule shows a balance hint and blocks confirm; balancing it clears both", async () => {
+  const user = userEvent.setup();
+  renderWithProviders(<InboxRow occurrence={rentOccurrence} schedule={rentSchedule} />);
+  await user.click(screen.getByRole("button", { name: /preview/i }));
+
+  await user.type(screen.getByLabelText("Rent"), "3100");
+  expect(screen.getByText("Doesn't balance: off by 100.00 CNY")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /^confirm$/i })).toBeDisabled();
+
+  await user.type(screen.getByLabelText("Bank"), "-3100");
+  expect(screen.queryByText(/doesn't balance/i)).not.toBeInTheDocument();
+  const confirmButton = screen.getByRole("button", { name: /^confirm$/i });
+  expect(confirmButton).toBeEnabled();
+
+  await user.click(confirmButton);
+  await waitFor(() => expect(api.confirm).toHaveBeenCalledTimes(1));
+  expect(api.confirm).toHaveBeenCalledWith(3, {
+    override_amounts: { r1: "3100", r2: "-3100" },
+  });
+});
+
+test("a stored unbalanced override shows the hint and disables confirm even collapsed", () => {
+  // No click on Preview — the row stays collapsed, and nothing is typed;
+  // the imbalance comes purely from a previously stored override.
+  const overridden: Occurrence = { ...rentOccurrence, override_amounts: { r1: "3100" } };
+  renderWithProviders(<InboxRow occurrence={overridden} schedule={rentSchedule} />);
+  expect(screen.getByText("Doesn't balance: off by 100.00 CNY")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /^confirm$/i })).toBeDisabled();
+});
+
+const subCentSchedule: Schedule = {
+  ...schedule,
+  id: 11,
+  name: "SubCent",
+  postings: [
+    { id: "s1", account: "Expenses:Misc", amount: "10.001", currency: "CNY" },
+    { id: "s2", account: "Assets:Bank", amount: "-10", currency: "CNY" },
+  ],
+  headline_amount: "10.001",
+  headline_currency: "CNY",
+};
+
+const subCentOccurrence: Occurrence = {
+  id: 4, schedule_id: 11, due_date: "2026-06-15", status: "pending",
+  override_amounts: {}, override_date: null, override_narration: null,
+  written_path: null, sprout_id: "sch11-20260615", confirmed_at: null,
+};
+
+test("a sub-cent gap shows the cleaned number instead of a rounded 0.00", () => {
+  renderWithProviders(<InboxRow occurrence={subCentOccurrence} schedule={subCentSchedule} />);
+  expect(screen.getByText(/0\.001/)).toBeInTheDocument();
 });
 
 // ── loan occurrence ───────────────────────────────────────────────────────────
@@ -179,4 +297,24 @@ test("non-overdue loan occurrence does not show needs-attention badge", () => {
   const future: Occurrence = { ...loanOccurrence, due_date: "2099-12-31" };
   renderWithProviders(<InboxRow occurrence={future} schedule={loanSchedule} />);
   expect(screen.queryByText("Needs attention")).not.toBeInTheDocument();
+});
+
+test("loan schedule: every amount input is disabled", () => {
+  // Loan rows start expanded, all three legs are blank/auto-balance with no
+  // derivable amount (loanSchedule.postings has 3 entries: p, i, pay).
+  renderWithProviders(<InboxRow occurrence={loanOccurrence} schedule={loanSchedule} />);
+  const amountInputs = screen
+    .getAllByRole("textbox")
+    .filter((el) => el.id.includes("-amount-"));
+  expect(amountInputs).toHaveLength(loanSchedule.postings.length);
+  amountInputs.forEach((el) => {
+    expect(el).toBeDisabled();
+    expect(el).toHaveAttribute("placeholder", "—");
+  });
+});
+
+test("loan schedule: confirm stays enabled and unblocked since blank legs aren't checkable", () => {
+  renderWithProviders(<InboxRow occurrence={loanOccurrence} schedule={loanSchedule} />);
+  expect(screen.queryByText(/doesn't balance/i)).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /^confirm$/i })).toBeEnabled();
 });
