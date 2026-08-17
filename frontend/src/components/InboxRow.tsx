@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
 
 import { useConfirm, useMarkPaidOutside, usePreview, useSkip } from "@/api/hooks";
-import { analyzeFlow, headlineDisplay } from "@/api/postings";
+import { analyzeFlow, balanceGap, headlineDisplay } from "@/api/postings";
 import type { ConfirmBody, Occurrence, Schedule } from "@/api/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -49,14 +49,14 @@ export function InboxRow({
     flow,
     schedule
   );
+  // In-progress typing layered on top of stored overrides — shared by the
+  // editor flow below and the balance check.
+  const effectiveOverrides = { ...occurrence.override_amounts, ...typedAmounts };
   // Separate flow, layering in-progress typing on top of stored overrides, so
   // a disabled leg's derived placeholder stays live while the user edits an
   // explicit leg (e.g. typing into one leg of a 2-leg schedule updates the
   // other leg's auto-balance placeholder immediately).
-  const editorFlow = analyzeFlow(schedule?.postings, {
-    ...occurrence.override_amounts,
-    ...typedAmounts,
-  });
+  const editorFlow = analyzeFlow(schedule?.postings, effectiveOverrides);
   // Every posting gets its own input, in schedule posting order — analyzeFlow
   // groups/omits legs (e.g. its fallback mode only surfaces 1-2), so it isn't
   // a complete leg list. Flow legs are only consulted for a derived amount to
@@ -65,6 +65,12 @@ export function InboxRow({
   const editorFlowLegById = new Map(
     [...editorFlow.sources, ...editorFlow.destinations].map((l) => [l.posting.id, l])
   );
+  // Client-side balance check on the effective (typed-or-stored) amounts, so
+  // a partial edit of an all-explicit schedule can't be confirmed into a
+  // 422. Undefined when not checkable (a blank leg remains, mixed
+  // currencies, cost/price) or already balanced.
+  const gap = balanceGap(schedule?.postings, effectiveOverrides);
+  const unbalanced = gap !== undefined;
   const effectiveDate = occurrence.override_date ?? occurrence.due_date;
   const fieldId = `occ-${occurrence.id}`;
 
@@ -145,7 +151,7 @@ export function InboxRow({
         <Button
           size="sm"
           onClick={onConfirm}
-          disabled={confirm.isPending}
+          disabled={confirm.isPending || unbalanced}
           className="flex-1 sm:flex-none"
         >
           <Check className="h-4 w-4" />
@@ -228,6 +234,14 @@ export function InboxRow({
                   );
                 })}
               </div>
+              {gap && (
+                <p className="text-xs text-destructive">
+                  {t("inboxRow.unbalanced", {
+                    amount: formatAmount(gap.amount),
+                    currency: gap.currency,
+                  })}
+                </p>
+              )}
             </div>
             <div className="space-y-1.5">
               <Label htmlFor={`${fieldId}-date`}>{t("inboxRow.date")}</Label>

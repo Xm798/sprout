@@ -99,6 +99,38 @@ export function headlineDisplay(
   };
 }
 
+/**
+ * Client-side balance check: sums each posting's effective amount (override,
+ * else the posting's own amount) and reports how far off zero it is. Mirrors
+ * analyzeFlow's fallback exclusions — not checkable (returns undefined) when
+ * any leg is blank, currencies differ, or a leg carries cost/price, since a
+ * plain sum can't validate those. Also undefined when the sum balances.
+ */
+export function balanceGap(
+  postings: Posting[] | undefined,
+  overrides: Record<string, string>
+): { amount: number; currency: string } | undefined {
+  const legs = postings ?? [];
+  if (legs.length === 0) return undefined;
+  if (legs.some((p) => p.cost != null || p.price != null)) return undefined;
+
+  const effective = legs.map((p) => overrides[p.id] ?? p.amount);
+  if (effective.some((v) => v == null)) return undefined;
+
+  const currencies = new Set(
+    legs.map((p) => p.currency).filter((c): c is string => c != null)
+  );
+  if (currencies.size !== 1) return undefined;
+
+  const values = effective.map((v) => Number(v));
+  if (values.some(Number.isNaN)) return undefined;
+
+  const sum = clean(values.reduce((a, b) => a + b, 0));
+  if (sum === 0) return undefined;
+
+  return { amount: sum, currency: [...currencies][0] };
+}
+
 // Posting helpers. analyzeFlow() is the single source of truth for list/summary
 // display (flow grouping, net headline amount). The inbox amount editor
 // iterates schedule postings directly (analyzeFlow's grouping can omit legs)

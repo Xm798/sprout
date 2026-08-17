@@ -158,16 +158,21 @@ const rentOccurrence: Occurrence = {
   written_path: null, sprout_id: "sch10-20260615", confirmed_at: null,
 };
 
-test("all-explicit legs: editing only the second leg overrides only that leg", async () => {
+test("all-explicit legs: editing only the second leg overrides only that leg, but leaves it unbalanced", async () => {
   const user = userEvent.setup();
   renderWithProviders(<InboxRow occurrence={rentOccurrence} schedule={rentSchedule} />);
   await user.click(screen.getByRole("button", { name: /preview/i }));
   await user.type(screen.getByLabelText("Bank"), "-3100");
-  await user.click(screen.getByRole("button", { name: /^confirm$/i }));
-  await waitFor(() => expect(api.confirm).toHaveBeenCalledTimes(1));
-  expect(api.confirm).toHaveBeenCalledWith(3, {
-    override_amounts: { r2: "-3100" },
-  });
+  // buildBody() still keys override_amounts by only the edited leg's id —
+  // verified via the live preview request, since Confirm is now disabled
+  // (Rent 3000 + Bank -3100 doesn't balance; see the balance-check tests below).
+  await waitFor(() =>
+    expect(api.previewTransient).toHaveBeenLastCalledWith(3, {
+      override_amounts: { r2: "-3100" },
+    })
+  );
+  expect(screen.getByRole("button", { name: /^confirm$/i })).toBeDisabled();
+  expect(api.confirm).not.toHaveBeenCalled();
 });
 
 test("all-explicit legs: editing both legs overrides both", async () => {
@@ -177,6 +182,27 @@ test("all-explicit legs: editing both legs overrides both", async () => {
   await user.type(screen.getByLabelText("Rent"), "3100");
   await user.type(screen.getByLabelText("Bank"), "-3100");
   await user.click(screen.getByRole("button", { name: /^confirm$/i }));
+  await waitFor(() => expect(api.confirm).toHaveBeenCalledTimes(1));
+  expect(api.confirm).toHaveBeenCalledWith(3, {
+    override_amounts: { r1: "3100", r2: "-3100" },
+  });
+});
+
+test("editing one leg of an all-explicit schedule shows a balance hint and blocks confirm; balancing it clears both", async () => {
+  const user = userEvent.setup();
+  renderWithProviders(<InboxRow occurrence={rentOccurrence} schedule={rentSchedule} />);
+  await user.click(screen.getByRole("button", { name: /preview/i }));
+
+  await user.type(screen.getByLabelText("Rent"), "3100");
+  expect(screen.getByText("Doesn't balance: off by 100.00 CNY")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /^confirm$/i })).toBeDisabled();
+
+  await user.type(screen.getByLabelText("Bank"), "-3100");
+  expect(screen.queryByText(/doesn't balance/i)).not.toBeInTheDocument();
+  const confirmButton = screen.getByRole("button", { name: /^confirm$/i });
+  expect(confirmButton).toBeEnabled();
+
+  await user.click(confirmButton);
   await waitFor(() => expect(api.confirm).toHaveBeenCalledTimes(1));
   expect(api.confirm).toHaveBeenCalledWith(3, {
     override_amounts: { r1: "3100", r2: "-3100" },

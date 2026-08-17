@@ -67,7 +67,8 @@
     "overrideDate": "覆盖日期",
     "overrideNarration": "覆盖摘要",
     "beancountPreview": "Beancount 预览",
-    "previewFailed": "预览渲染失败。"
+    "previewFailed": "预览渲染失败。",
+    "unbalanced": "金额不平衡：相差 {{amount}} {{currency}}"
   },
   "history": {
     "title": "历史",

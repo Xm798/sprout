@@ -68,7 +68,8 @@
     "overrideDate": "Override date",
     "overrideNarration": "Override narration",
     "beancountPreview": "Beancount preview",
-    "previewFailed": "Failed to render preview."
+    "previewFailed": "Failed to render preview.",
+    "unbalanced": "Doesn't balance: off by {{amount}} {{currency}}"
   },
   "history": {
     "title": "History",
