@@ -209,6 +209,38 @@ test("editing one leg of an all-explicit schedule shows a balance hint and block
   });
 });
 
+test("a stored unbalanced override shows the hint and disables confirm even collapsed", () => {
+  // No click on Preview — the row stays collapsed, and nothing is typed;
+  // the imbalance comes purely from a previously stored override.
+  const overridden: Occurrence = { ...rentOccurrence, override_amounts: { r1: "3100" } };
+  renderWithProviders(<InboxRow occurrence={overridden} schedule={rentSchedule} />);
+  expect(screen.getByText("Doesn't balance: off by 100.00 CNY")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /^confirm$/i })).toBeDisabled();
+});
+
+const subCentSchedule: Schedule = {
+  ...schedule,
+  id: 11,
+  name: "SubCent",
+  postings: [
+    { id: "s1", account: "Expenses:Misc", amount: "10.001", currency: "CNY" },
+    { id: "s2", account: "Assets:Bank", amount: "-10", currency: "CNY" },
+  ],
+  headline_amount: "10.001",
+  headline_currency: "CNY",
+};
+
+const subCentOccurrence: Occurrence = {
+  id: 4, schedule_id: 11, due_date: "2026-06-15", status: "pending",
+  override_amounts: {}, override_date: null, override_narration: null,
+  written_path: null, sprout_id: "sch11-20260615", confirmed_at: null,
+};
+
+test("a sub-cent gap shows the cleaned number instead of a rounded 0.00", () => {
+  renderWithProviders(<InboxRow occurrence={subCentOccurrence} schedule={subCentSchedule} />);
+  expect(screen.getByText(/0\.001/)).toBeInTheDocument();
+});
+
 // ── loan occurrence ───────────────────────────────────────────────────────────
 
 const loanSchedule: Schedule = {
@@ -279,4 +311,10 @@ test("loan schedule: every amount input is disabled", () => {
     expect(el).toBeDisabled();
     expect(el).toHaveAttribute("placeholder", "—");
   });
+});
+
+test("loan schedule: confirm stays enabled and unblocked since blank legs aren't checkable", () => {
+  renderWithProviders(<InboxRow occurrence={loanOccurrence} schedule={loanSchedule} />);
+  expect(screen.queryByText(/doesn't balance/i)).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /^confirm$/i })).toBeEnabled();
 });

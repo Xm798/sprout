@@ -71,6 +71,13 @@ export function InboxRow({
   // currencies, cost/price) or already balanced.
   const gap = balanceGap(schedule?.postings, effectiveOverrides);
   const unbalanced = gap !== undefined;
+  // formatAmount() forces 2 fraction digits, which would round a sub-cent gap
+  // down to "0.00" — fall back to the plain cleaned number in that case.
+  const gapAmountText = gap
+    ? Math.abs(gap.amount) >= 0.01
+      ? formatAmount(gap.amount)
+      : String(gap.amount)
+    : undefined;
   const effectiveDate = occurrence.override_date ?? occurrence.due_date;
   const fieldId = `occ-${occurrence.id}`;
 
@@ -157,6 +164,11 @@ export function InboxRow({
           <Check className="h-4 w-4" />
           {t("inboxRow.confirm")}
         </Button>
+        {gap && (
+          <span className="text-xs text-destructive">
+            {t("inboxRow.unbalanced", { amount: gapAmountText, currency: gap.currency })}
+          </span>
+        )}
         {isLoan ? (
           <Button
             size="sm"
@@ -234,14 +246,6 @@ export function InboxRow({
                   );
                 })}
               </div>
-              {gap && (
-                <p className="text-xs text-destructive">
-                  {t("inboxRow.unbalanced", {
-                    amount: formatAmount(gap.amount),
-                    currency: gap.currency,
-                  })}
-                </p>
-              )}
             </div>
             <div className="space-y-1.5">
               <Label htmlFor={`${fieldId}-date`}>{t("inboxRow.date")}</Label>
