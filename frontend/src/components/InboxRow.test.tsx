@@ -234,11 +234,15 @@ test("non-overdue loan occurrence does not show needs-attention badge", () => {
 });
 
 test("loan schedule: every amount input is disabled", () => {
-  // Loan rows start expanded, all three legs are blank/auto-balance.
+  // Loan rows start expanded, all three legs are blank/auto-balance with no
+  // derivable amount (loanSchedule.postings has 3 entries: p, i, pay).
   renderWithProviders(<InboxRow occurrence={loanOccurrence} schedule={loanSchedule} />);
   const amountInputs = screen
     .getAllByRole("textbox")
     .filter((el) => el.id.includes("-amount-"));
-  expect(amountInputs.length).toBeGreaterThan(0);
-  amountInputs.forEach((el) => expect(el).toBeDisabled());
+  expect(amountInputs).toHaveLength(loanSchedule.postings.length);
+  amountInputs.forEach((el) => {
+    expect(el).toBeDisabled();
+    expect(el).toHaveAttribute("placeholder", "—");
+  });
 });

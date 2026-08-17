@@ -45,15 +45,14 @@ export function InboxRow({
     flow,
     schedule
   );
-  // Every amount-bearing leg gets its own input, in schedule posting order.
-  // Blank auto-balance legs stay read-only, showing the derived amount.
-  const postingOrder = new Map((schedule?.postings ?? []).map((p, i) => [p.id, i]));
-  const legs = [...flow.sources, ...flow.destinations].sort(
-    (a, b) => (postingOrder.get(a.posting.id) ?? 0) - (postingOrder.get(b.posting.id) ?? 0)
+  // Every posting gets its own input, in schedule posting order — analyzeFlow
+  // groups/omits legs (e.g. its fallback mode only surfaces 1-2), so it isn't
+  // a complete leg list. Flow legs are only consulted for a derived amount to
+  // show on blank (posting.amount == null) legs.
+  const postings = schedule?.postings ?? [];
+  const flowLegById = new Map(
+    [...flow.sources, ...flow.destinations].map((l) => [l.posting.id, l])
   );
-  // In fallback mode (flow.amount undefined) FlowLeg.derived is always false,
-  // so disabled falls back to the posting's own blank/explicit status instead.
-  const isFallback = flow.amount === undefined;
   const effectiveDate = occurrence.override_date ?? occurrence.due_date;
   const fieldId = `occ-${occurrence.id}`;
 
@@ -187,30 +186,31 @@ export function InboxRow({
             <div className="space-y-1.5">
               <Label>{t("inboxRow.amount")}</Label>
               <div className="space-y-2">
-                {legs.map((leg) => {
-                  const disabled = isFallback ? leg.posting.amount == null : leg.derived;
-                  const legId = `${fieldId}-amount-${leg.posting.id}`;
+                {postings.map((posting) => {
+                  const disabled = posting.amount == null;
+                  const legId = `${fieldId}-amount-${posting.id}`;
+                  const derivedAmount = flowLegById.get(posting.id)?.amount;
                   const placeholder = disabled
-                    ? leg.amount != null
-                      ? String(leg.amount)
+                    ? derivedAmount != null
+                      ? String(derivedAmount)
                       : "—"
-                    : occurrence.override_amounts[leg.posting.id] ?? leg.posting.amount ?? "";
+                    : occurrence.override_amounts[posting.id] ?? posting.amount ?? "";
                   return (
-                    <div key={leg.posting.id} className="space-y-1">
+                    <div key={posting.id} className="space-y-1">
                       <Label
                         htmlFor={legId}
                         className="text-xs font-normal text-muted-foreground"
                       >
-                        {leafAccount(leg.posting.account)}
+                        {leafAccount(posting.account)}
                       </Label>
                       <Input
                         id={legId}
                         inputMode="decimal"
                         disabled={disabled}
                         placeholder={placeholder}
-                        value={amounts[leg.posting.id] ?? ""}
+                        value={amounts[posting.id] ?? ""}
                         onChange={(e) =>
-                          setAmounts((prev) => ({ ...prev, [leg.posting.id]: e.target.value }))
+                          setAmounts((prev) => ({ ...prev, [posting.id]: e.target.value }))
                         }
                       />
                     </div>
