@@ -55,16 +55,25 @@ test("confirm calls the api with an empty body by default", async () => {
   expect(api.confirm).toHaveBeenCalledWith(1, {});
 });
 
-test("editing the amount sends override_amounts keyed by the headline posting id", async () => {
+test("editing a leg sends override_amounts keyed by that leg's posting id", async () => {
   const user = userEvent.setup();
   renderWithProviders(<InboxRow occurrence={occurrence} schedule={schedule} />);
   await user.click(screen.getByRole("button", { name: /preview/i }));
-  await user.type(screen.getByLabelText(/^amount/i), "20.00");
+  await user.type(screen.getByLabelText("Subscription"), "20.00");
   await user.click(screen.getByRole("button", { name: /^confirm$/i }));
   await waitFor(() => expect(api.confirm).toHaveBeenCalledTimes(1));
   expect(api.confirm).toHaveBeenCalledWith(1, {
     override_amounts: { p1: "20.00" },
   });
+});
+
+test("blank auto-balance leg's input is disabled and shows the derived amount", async () => {
+  const user = userEvent.setup();
+  renderWithProviders(<InboxRow occurrence={occurrence} schedule={schedule} />);
+  await user.click(screen.getByRole("button", { name: /preview/i }));
+  const input = screen.getByLabelText("CreditCard");
+  expect(input).toBeDisabled();
+  expect(input).toHaveAttribute("placeholder", "-15");
 });
 
 test("skip calls the api", async () => {
@@ -120,7 +129,50 @@ test("amount input placeholder shows the editable leg's own amount, not the net"
     <InboxRow occurrence={{ ...occurrence, schedule_id: 8 }} schedule={payrollSchedule} />
   );
   await user.click(screen.getByRole("button", { name: /preview/i }));
-  expect(screen.getByLabelText(/^amount/i)).toHaveAttribute("placeholder", "-10000");
+  expect(screen.getByLabelText("Salary")).toHaveAttribute("placeholder", "-10000");
+});
+
+const rentSchedule: Schedule = {
+  ...schedule,
+  id: 10,
+  name: "Rent",
+  postings: [
+    { id: "r1", account: "Expenses:Rent", amount: "3000", currency: "CNY" },
+    { id: "r2", account: "Assets:Bank", amount: "-3000", currency: "CNY" },
+  ],
+  headline_amount: "3000",
+  headline_currency: "CNY",
+};
+
+const rentOccurrence: Occurrence = {
+  id: 3, schedule_id: 10, due_date: "2026-06-15", status: "pending",
+  override_amounts: {}, override_date: null, override_narration: null,
+  written_path: null, sprout_id: "sch10-20260615", confirmed_at: null,
+};
+
+test("all-explicit legs: editing only the second leg overrides only that leg", async () => {
+  const user = userEvent.setup();
+  renderWithProviders(<InboxRow occurrence={rentOccurrence} schedule={rentSchedule} />);
+  await user.click(screen.getByRole("button", { name: /preview/i }));
+  await user.type(screen.getByLabelText("Bank"), "-3100");
+  await user.click(screen.getByRole("button", { name: /^confirm$/i }));
+  await waitFor(() => expect(api.confirm).toHaveBeenCalledTimes(1));
+  expect(api.confirm).toHaveBeenCalledWith(3, {
+    override_amounts: { r2: "-3100" },
+  });
+});
+
+test("all-explicit legs: editing both legs overrides both", async () => {
+  const user = userEvent.setup();
+  renderWithProviders(<InboxRow occurrence={rentOccurrence} schedule={rentSchedule} />);
+  await user.click(screen.getByRole("button", { name: /preview/i }));
+  await user.type(screen.getByLabelText("Rent"), "3100");
+  await user.type(screen.getByLabelText("Bank"), "-3100");
+  await user.click(screen.getByRole("button", { name: /^confirm$/i }));
+  await waitFor(() => expect(api.confirm).toHaveBeenCalledTimes(1));
+  expect(api.confirm).toHaveBeenCalledWith(3, {
+    override_amounts: { r1: "3100", r2: "-3100" },
+  });
 });
 
 // ── loan occurrence ───────────────────────────────────────────────────────────
@@ -179,4 +231,14 @@ test("non-overdue loan occurrence does not show needs-attention badge", () => {
   const future: Occurrence = { ...loanOccurrence, due_date: "2099-12-31" };
   renderWithProviders(<InboxRow occurrence={future} schedule={loanSchedule} />);
   expect(screen.queryByText("Needs attention")).not.toBeInTheDocument();
+});
+
+test("loan schedule: every amount input is disabled", () => {
+  // Loan rows start expanded, all three legs are blank/auto-balance.
+  renderWithProviders(<InboxRow occurrence={loanOccurrence} schedule={loanSchedule} />);
+  const amountInputs = screen
+    .getAllByRole("textbox")
+    .filter((el) => el.id.includes("-amount-"));
+  expect(amountInputs.length).toBeGreaterThan(0);
+  amountInputs.forEach((el) => expect(el).toBeDisabled());
 });

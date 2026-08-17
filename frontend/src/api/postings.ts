@@ -100,10 +100,5 @@ export function headlineDisplay(
 }
 
 // Posting helpers. analyzeFlow() is the single source of truth for list/summary
-// display: flow grouping and the net headline amount. headlineLeg() remains the
-// convention for which leg the inbox amount editor tunes (first amount-bearing).
-
-/** First amount-bearing leg — the editable leg that the inbox amount editor tunes. */
-export function headlineLeg(postings?: Posting[]): Posting | undefined {
-  return postings?.find((p) => p.amount != null);
-}
+// display (flow grouping, net headline amount) and for the inbox amount editor,
+// which renders one input per flow leg.
