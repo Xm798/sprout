@@ -39,19 +39,31 @@ export function InboxRow({
   const isOverdue = isLoan && occurrence.status === "pending" && occurrence.due_date < today;
 
   const name = schedule?.name ?? t("common.scheduleFallback", { id: occurrence.schedule_id });
-  // Headline = net flow of the auto-balance leg.
+  // Non-empty typed amounts, keyed by posting id — shared by buildBody() and
+  // the editor's derived-placeholder flow below.
+  const typedAmounts = Object.fromEntries(Object.entries(amounts).filter(([, v]) => v));
+  // Headline = net flow of the auto-balance leg, from stored overrides only,
+  // so the collapsed headline / FlowAccounts don't jump on every keystroke.
   const flow = analyzeFlow(schedule?.postings, occurrence.override_amounts);
   const { amount: baseAmount = "", currency: baseCurrency } = headlineDisplay(
     flow,
     schedule
   );
+  // Separate flow, layering in-progress typing on top of stored overrides, so
+  // a disabled leg's derived placeholder stays live while the user edits an
+  // explicit leg (e.g. typing into one leg of a 2-leg schedule updates the
+  // other leg's auto-balance placeholder immediately).
+  const editorFlow = analyzeFlow(schedule?.postings, {
+    ...occurrence.override_amounts,
+    ...typedAmounts,
+  });
   // Every posting gets its own input, in schedule posting order — analyzeFlow
   // groups/omits legs (e.g. its fallback mode only surfaces 1-2), so it isn't
   // a complete leg list. Flow legs are only consulted for a derived amount to
   // show on blank (posting.amount == null) legs.
   const postings = schedule?.postings ?? [];
-  const flowLegById = new Map(
-    [...flow.sources, ...flow.destinations].map((l) => [l.posting.id, l])
+  const editorFlowLegById = new Map(
+    [...editorFlow.sources, ...editorFlow.destinations].map((l) => [l.posting.id, l])
   );
   const effectiveDate = occurrence.override_date ?? occurrence.due_date;
   const fieldId = `occ-${occurrence.id}`;
@@ -60,9 +72,8 @@ export function InboxRow({
   // backend keeps any persisted overrides.
   function buildBody(): ConfirmBody {
     const body: ConfirmBody = {};
-    const typed = Object.entries(amounts).filter(([, v]) => v);
-    if (typed.length > 0) {
-      body.override_amounts = Object.fromEntries(typed);
+    if (Object.keys(typedAmounts).length > 0) {
+      body.override_amounts = typedAmounts;
     }
     if (date) body.override_date = date;
     if (narration) body.override_narration = narration;
@@ -189,7 +200,7 @@ export function InboxRow({
                 {postings.map((posting) => {
                   const disabled = posting.amount == null;
                   const legId = `${fieldId}-amount-${posting.id}`;
-                  const derivedAmount = flowLegById.get(posting.id)?.amount;
+                  const derivedAmount = editorFlowLegById.get(posting.id)?.amount;
                   const placeholder = disabled
                     ? derivedAmount != null
                       ? String(derivedAmount)

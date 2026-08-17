@@ -100,5 +100,6 @@ export function headlineDisplay(
 }
 
 // Posting helpers. analyzeFlow() is the single source of truth for list/summary
-// display (flow grouping, net headline amount) and for the inbox amount editor,
-// which renders one input per flow leg.
+// display (flow grouping, net headline amount). The inbox amount editor
+// iterates schedule postings directly (analyzeFlow's grouping can omit legs)
+// and calls analyzeFlow only to look up each blank leg's derived amount.

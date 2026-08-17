@@ -76,6 +76,14 @@ test("blank auto-balance leg's input is disabled and shows the derived amount", 
   expect(input).toHaveAttribute("placeholder", "-15");
 });
 
+test("typing into an explicit leg keeps the derived placeholder live", async () => {
+  const user = userEvent.setup();
+  renderWithProviders(<InboxRow occurrence={occurrence} schedule={schedule} />);
+  await user.click(screen.getByRole("button", { name: /preview/i }));
+  await user.type(screen.getByLabelText("Subscription"), "20.00");
+  expect(screen.getByLabelText("CreditCard")).toHaveAttribute("placeholder", "-20");
+});
+
 test("skip calls the api", async () => {
   const user = userEvent.setup();
   renderWithProviders(<InboxRow occurrence={occurrence} schedule={schedule} />);
