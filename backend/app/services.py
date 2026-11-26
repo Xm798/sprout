@@ -22,7 +22,7 @@ from app.ledger import (
     find_transaction_with_errors,
     load_sprout_ids,
     new_load_errors,
-    validate_snippet,
+    validate_snippet_with_includes,
 )
 from app.writer import (
     target_path, append_transaction, ensure_included, validate_target_file,
@@ -442,6 +442,30 @@ def build_preview(session: Session, config: AppConfig, occurrence_id: int, **tra
     })
 
 
+def _append_and_commit(session: Session, occ: Occurrence, path: Path, text: str) -> Occurrence:
+    """Append ``text`` to ``path`` and commit ``occ`` to the database.
+
+    Snapshots ``path`` right before writing so a failed DB commit restores the
+    file to its prior state instead of leaving an orphaned transaction on disk
+    while the occurrence stays uncommitted in the DB.
+    """
+    existed = path.exists()
+    snapshot = path.read_bytes() if existed else None
+    append_transaction(path, text)
+    try:
+        session.add(occ)
+        session.commit()
+    except Exception:
+        session.rollback()
+        if existed:
+            replace_file(path, snapshot)
+        else:
+            path.unlink(missing_ok=True)
+        raise
+    session.refresh(occ)
+    return occ
+
+
 def confirm_occurrence(
     session: Session, config: AppConfig, occurrence_id: int,
     override_amounts: Optional[dict] = None,
@@ -476,7 +500,7 @@ def confirm_occurrence(
     tf = validate_target_file(config, sch.target_file)
 
     text = render_formatted(occ, sch, config, effective_postings=effective)
-    snippet_errors = validate_snippet(config.ledger_main_file, text)
+    snippet_errors, known_included = validate_snippet_with_includes(config.ledger_main_file, text)
     if snippet_errors:
         raise ValueError("; ".join(snippet_errors))
 
@@ -492,18 +516,14 @@ def confirm_occurrence(
             "or fix your include directives before confirming again"
         )
     if tf:
-        ensure_included(config, path)
-    append_transaction(path, text)
+        ensure_included(config, path, known_included=known_included)
 
     if sch.kind == "loan":
         occ.frozen_postings = dump_postings(effective)
     occ.status = "confirmed"
     occ.written_path = str(path)
     occ.confirmed_at = datetime.datetime.now()
-    session.add(occ)
-    session.commit()
-    session.refresh(occ)
-    return occ
+    return _append_and_commit(session, occ, path, text)
 
 
 def skip_occurrence(session: Session, occurrence_id: int) -> Occurrence:
@@ -605,19 +625,15 @@ def readd_occurrence(session: Session, config: AppConfig, occurrence_id: int) ->
             "reachable from the main ledger — check your include directives"
         )
 
-    snippet_errors = validate_snippet(config.ledger_main_file, text)
+    snippet_errors, known_included = validate_snippet_with_includes(config.ledger_main_file, text)
     if snippet_errors:
         raise ValueError("; ".join(snippet_errors))
     if tf:
-        ensure_included(config, path)
-    append_transaction(path, text)
+        ensure_included(config, path, known_included=known_included)
 
     occ.written_path = str(path)
     occ.confirmed_at = datetime.datetime.now()
-    session.add(occ)
-    session.commit()
-    session.refresh(occ)
-    return occ
+    return _append_and_commit(session, occ, path, text)
 
 
 def get_written_transaction(session: Session, config: AppConfig, occurrence_id: int) -> tuple[str, str]:

@@ -16,6 +16,7 @@ def test_postgres_url_has_no_sqlite_connect_args():
     # Should construct without raising; psycopg driver resolved lazily at connect time.
     engine = make_engine("postgresql+psycopg://u:p@localhost:5432/sprout")
     assert engine.dialect.name == "postgresql"
+    assert engine.pool._pre_ping is True
 
 
 def test_default_falls_back_to_sqlite_db_path(monkeypatch):
@@ -135,3 +136,36 @@ def test_sqlite_engine_sets_wal_and_busy_timeout(tmp_path):
         assert c.execute(sa.text("PRAGMA journal_mode")).scalar().lower() == "wal"
         assert int(c.execute(sa.text("PRAGMA busy_timeout")).scalar()) >= 5000
     eng.dispose()
+
+
+def test_datetime_columns_use_naive_sqlalchemy_datetime():
+    """Every table timestamp column must bind as plain DateTime(timezone=False)
+    rather than SQLModel >= 0.0.50's UTCDateTime, which rejects naive datetimes."""
+    import sqlalchemy as sa
+    from app.models import NotificationLog, Occurrence, RateCacheEntry, Schedule
+
+    columns = [
+        Schedule.__table__.c.created_at,
+        Schedule.__table__.c.updated_at,
+        RateCacheEntry.__table__.c.fetched_at,
+        Occurrence.__table__.c.confirmed_at,
+        NotificationLog.__table__.c.sent_at,
+    ]
+    for col in columns:
+        assert type(col.type) is sa.DateTime
+        assert col.type.timezone is False
+
+
+def test_alembic_upgrade_keeps_existing_loggers_enabled(tmp_path, monkeypatch):
+    """Alembic's env.py must not disable uvicorn/app loggers during init_db()."""
+    import logging
+    from alembic import command
+
+    logger = logging.getLogger("app.test_alembic_logger")
+    logger.disabled = False
+    db_file = tmp_path / "logcheck.db"
+    monkeypatch.setenv("SPROUT_DATABASE_URL", f"sqlite:///{db_file}")
+
+    command.upgrade(_alembic_config(), "head")
+
+    assert logger.disabled is False

@@ -1,7 +1,7 @@
 import datetime
 from typing import Optional
 
-from sqlalchemy import Column, JSON, UniqueConstraint
+from sqlalchemy import Column, DateTime, JSON, UniqueConstraint
 from sqlalchemy.ext.mutable import MutableDict, MutableList
 from sqlmodel import SQLModel, Field
 
@@ -39,8 +39,11 @@ class Schedule(ScheduleBase, table=True):
         default_factory=list,
         sa_column=Column(MutableList.as_mutable(JSON), nullable=False),
     )
-    created_at: datetime.datetime = Field(default_factory=datetime.datetime.now)
-    updated_at: datetime.datetime = Field(default_factory=datetime.datetime.now)
+    # Explicit DateTime (timezone=False) matches the Alembic schema and stays
+    # compatible with sqlmodel >= 0.0.50, which otherwise maps bare datetime to
+    # UTCDateTime and rejects naive datetime.now() values.
+    created_at: datetime.datetime = Field(default_factory=datetime.datetime.now, sa_type=DateTime)
+    updated_at: datetime.datetime = Field(default_factory=datetime.datetime.now, sa_type=DateTime)
 
 
 class ScheduleCreate(ScheduleBase):
@@ -78,7 +81,7 @@ class RateCacheEntry(SQLModel, table=True):
     source: str = Field(primary_key=True)
     rate: str
     effective_date: datetime.date
-    fetched_at: datetime.datetime
+    fetched_at: datetime.datetime = Field(sa_type=DateTime)
 
 
 class Occurrence(SQLModel, table=True):
@@ -99,7 +102,7 @@ class Occurrence(SQLModel, table=True):
     # Indexed: materialization probes existence by sprout_id for every past
     # installment on every inbox fetch.
     sprout_id: Optional[str] = Field(default=None, index=True)
-    confirmed_at: Optional[datetime.datetime] = None
+    confirmed_at: Optional[datetime.datetime] = Field(default=None, sa_type=DateTime)
     loan_seq: Optional[int] = None
     loan_event: str = "regular"  # non-null sentinel; part of widened unique constraint
     event_id: str = ""           # non-null sentinel; part of widened unique constraint
@@ -116,7 +119,7 @@ class NotificationLog(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     occurrence_id: int = Field(foreign_key="occurrence.id", index=True)
     channel_id: str
-    sent_at: datetime.datetime = Field(default_factory=datetime.datetime.now)
+    sent_at: datetime.datetime = Field(default_factory=datetime.datetime.now, sa_type=DateTime)
 
 
 class OccurrenceRead(SQLModel):

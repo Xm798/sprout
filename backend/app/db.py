@@ -43,9 +43,12 @@ def is_sqlite_url(url: str) -> bool:
 def make_engine(url: str | None = None):
     resolved = _resolve_url(url) if url else resolve_database_url()
     connect_args = {}
+    engine_kwargs = {}
     if is_sqlite_url(resolved):
         connect_args["check_same_thread"] = False
-    eng = create_engine(resolved, connect_args=connect_args)
+    else:
+        engine_kwargs["pool_pre_ping"] = True
+    eng = create_engine(resolved, connect_args=connect_args, **engine_kwargs)
     if is_sqlite_url(resolved):
         @event.listens_for(eng, "connect")
         def _sqlite_pragmas(dbapi_conn, _record):

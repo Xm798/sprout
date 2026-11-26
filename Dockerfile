@@ -11,9 +11,10 @@ FROM python:3.12-slim AS runtime
 WORKDIR /app
 RUN pip install --no-cache-dir uv
 COPY backend/ ./
-RUN uv pip install --system -e .
+RUN uv sync --frozen --no-dev
 COPY --from=frontend /fe/dist ./static
 RUN mkdir -p /data
+ENV PATH="/app/.venv/bin:$PATH"
 ENV SPROUT_STATIC_DIR=/app/static
 ENV SPROUT_DB_PATH=/data/sprout.db
 EXPOSE 8000

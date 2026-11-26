@@ -151,16 +151,19 @@ def _diff_messages(base_msgs: list[str], new_msgs: list[str]) -> list[str]:
     return new
 
 
-def validate_snippet(main_path: str, snippet: str) -> list[str]:
-    """Return new error messages introduced by appending `snippet` to the ledger.
+def validate_snippet_with_includes(main_path: str, snippet: str) -> tuple[list[str], set[str]]:
+    """Return ``(new_errors, included_realpaths)`` for appending ``snippet`` to
+    the ledger.
 
-    Loads the ledger once for a baseline, then loads a temp file that includes the
-    real ledger plus the snippet, and returns errors present only in the combined
-    load. Empty list means the snippet parses and balances against open accounts.
+    Loads the ledger once for a baseline (whose ``options_map["include"]`` is
+    also returned so callers can check reachability without a third full load),
+    then loads a temp file that includes the real ledger plus the snippet, and
+    returns errors present only in the combined load.
     """
     abs_main = os.path.abspath(main_path)
-    _e, base_errors, _o = loader.load_file(abs_main)
+    _e, base_errors, base_options = loader.load_file(abs_main)
     base_msgs = _error_messages(base_errors)
+    included = {os.path.realpath(p) for p in base_options.get("include", [])}
 
     combined = f'include "{abs_main}"\n\n{snippet}\n'
     tmp_dir = os.path.dirname(abs_main)
@@ -171,4 +174,13 @@ def validate_snippet(main_path: str, snippet: str) -> list[str]:
         _e2, comb_errors, _o2 = loader.load_file(tmp_path)
     finally:
         os.unlink(tmp_path)
-    return _diff_messages(base_msgs, _error_messages(comb_errors))
+    return _diff_messages(base_msgs, _error_messages(comb_errors)), included
+
+
+def validate_snippet(main_path: str, snippet: str) -> list[str]:
+    """Return new error messages introduced by appending `snippet` to the ledger.
+
+    Empty list means the snippet parses and balances against open accounts.
+    """
+    errors, _included = validate_snippet_with_includes(main_path, snippet)
+    return errors

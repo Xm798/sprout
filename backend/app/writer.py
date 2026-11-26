@@ -123,7 +123,9 @@ def delete_block(path: Path, lineno: int) -> str:
     return _block_text(lines, start, end)
 
 
-def ensure_included(config: AppConfig, target: Path) -> None:
+def ensure_included(
+    config: AppConfig, target: Path, *, known_included: set[str] | None = None
+) -> None:
     """Make `target` loadable from the main ledger.
 
     Creates the file when missing (an include whose glob matches no file is
@@ -132,11 +134,15 @@ def ensure_included(config: AppConfig, target: Path) -> None:
     already reachable — directly, via a sub-file, or via a glob include.
     Integrates whatever path it is given; callers are responsible for
     validating it (validate_target_file) beforehand.
+
+    When `known_included` (realpaths from a recent baseline load) is provided
+    and `target` already exists on disk, a hit skips the extra full-ledger load.
     """
     if target.is_dir():
         raise ValueError("target_file is a directory")
     target.parent.mkdir(parents=True, exist_ok=True)
-    if not target.exists():
+    existed = target.exists()
+    if not existed:
         target.touch()
     main = Path(config.ledger_main_file).resolve()
     rel = Path(os.path.relpath(target.resolve(), main.parent)).as_posix()
@@ -147,12 +153,14 @@ def ensure_included(config: AppConfig, target: Path) -> None:
     # configured root/main paths — guard at the interpolation itself.
     if '"' in rel:
         raise ValueError("include path must not contain quotes")
-    # Fast path: the exact line this function appends is already present.
-    # Skips the full-ledger reachability load on every steady-state confirm;
-    # glob/sub-file-reachable targets fall through to the loader check.
+    # Fast path: the exact line this function appends is already present, or
+    # a prior baseline load already saw this existing file in its include tree.
     main_text = main.read_text() if main.exists() else ""
     if any(line.strip() == include_line for line in main_text.splitlines()):
         return
-    if os.path.realpath(target) in included_files(str(main)):
+    target_real = os.path.realpath(target)
+    if existed and known_included is not None and target_real in known_included:
+        return
+    if target_real in included_files(str(main)):
         return
     append_transaction(main, include_line + "\n")

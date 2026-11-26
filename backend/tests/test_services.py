@@ -1091,3 +1091,44 @@ def test_update_schedule_still_prunes_occurrence_not_in_new_rule(session, config
 
     assert session.get(Occurrence, occ_id) is None          # pruned
     assert session.get(NotificationLog, nl_id) is None      # log pruned too
+
+
+def test_confirm_restores_existing_file_when_commit_fails(session, config, today, monkeypatch):
+    """If session.commit() raises after append_transaction, the target file must
+    be restored byte-identical instead of leaving an orphaned transaction on disk."""
+    sch = _make_schedule(session)
+    services.materialize_occurrences(session, config, today)
+    occ = _first_occ(session, sch)
+    target = Path(config.ledger_root, "sprout.bean")
+    original = "; existing header\n"
+    target.write_text(original)
+
+    def boom():
+        raise RuntimeError("db commit failed")
+
+    monkeypatch.setattr(session, "commit", boom)
+    with pytest.raises(RuntimeError, match="db commit failed"):
+        services.confirm_occurrence(session, config, occ.id)
+
+    assert target.read_text() == original
+    session.refresh(occ)
+    assert occ.status == "pending"
+
+
+def test_confirm_unlinks_newly_created_file_when_commit_fails(session, config, today, monkeypatch):
+    sch = _make_schedule(session)
+    services.materialize_occurrences(session, config, today)
+    occ = _first_occ(session, sch)
+    target = Path(config.ledger_root, "sprout.bean")
+    assert not target.exists()
+
+    def boom():
+        raise RuntimeError("db commit failed")
+
+    monkeypatch.setattr(session, "commit", boom)
+    with pytest.raises(RuntimeError, match="db commit failed"):
+        services.confirm_occurrence(session, config, occ.id)
+
+    assert not target.exists()
+    session.refresh(occ)
+    assert occ.status == "pending"

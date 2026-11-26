@@ -173,6 +173,24 @@ def test_ensure_included_relpath_when_root_differs_from_main_dir(tmp_path):
     assert 'include "../rent.bean"' in main.read_text()
 
 
+def test_ensure_included_skips_reload_when_known_included_matches(tmp_path, monkeypatch):
+    import os
+    from app import writer
+
+    cfg = _cfg(tmp_path)
+    main = _main_ledger(tmp_path, 'include "txns/*.bean"\n')
+    target = tmp_path / "txns" / "rent.bean"
+    target.parent.mkdir()
+    target.write_text("")
+
+    def fail_if_called(_main):
+        raise AssertionError("included_files() should not reload when known_included matches")
+
+    monkeypatch.setattr(writer, "included_files", fail_if_called)
+    ensure_included(cfg, target, known_included={os.path.realpath(target)})
+    assert "rent.bean" not in main.read_text()
+
+
 # ── delete_block / read_block ──────────────────────────────────────────────────
 
 BLOCK = (

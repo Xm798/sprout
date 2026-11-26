@@ -1,5 +1,6 @@
 import datetime
 
+import beanfmt
 import pytest
 
 from app.bean_format import format_transaction, apply_beanfmt
@@ -105,8 +106,9 @@ _SAMPLE = (
 def test_apply_beanfmt_defaults_without_config(tmp_path, workspace):
     ws = {"empty-dir": tmp_path, "none": None, "missing-dir": tmp_path / "nope"}[workspace]
     text = apply_beanfmt(_SAMPLE, ws)
-    # beanfmt defaults: 4-space indent, meta and sprout-id line preserved
-    assert "    Expenses:Subscription" in text
+    # Must apply beanfmt defaults (aligning amounts), not fall back unchanged.
+    assert text == beanfmt.format(_SAMPLE)
+    assert text != _SAMPLE
     assert 'sprout-id: "sch1-20260615"' in text
     assert text.endswith("\n")
 
