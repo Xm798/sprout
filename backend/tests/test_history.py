@@ -133,8 +133,7 @@ def test_readd_restores_missing_transaction(client, tmp_path):
 
 def test_readd_formats_whole_target_file(client, tmp_path):
     (tmp_path / ".beanfmt.toml").write_text('sort = "asc"\nindent = 4\n')
-    occ = _seeded_inbox(client)[0]  # 2026-01-15
-    confirmed = client.post(f"/api/inbox/{occ['id']}/confirm", json={}).json()
+    confirmed = _confirm_first(client)  # 2026-01-15
     ledger = tmp_path / "sprout.bean"
 
     # Replace the file with an unformatted later entry so the confirmed one is missing.
@@ -143,7 +142,7 @@ def test_readd_formats_whole_target_file(client, tmp_path):
         "  Expenses:Subscription  5.00 USD\n"
         "  Assets:CreditCard\n"
     )
-    r = client.post(f"/api/history/{occ['id']}/readd")
+    r = client.post(f"/api/history/{confirmed['id']}/readd")
     assert r.status_code == 200, r.text
     written = ledger.read_text()
     assert confirmed["sprout_id"] in written

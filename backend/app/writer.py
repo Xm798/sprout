@@ -52,6 +52,15 @@ def validate_target_file(config: AppConfig, value: str | None) -> str | None:
     return p.as_posix()
 
 
+def _append_line(path: Path, line: str) -> None:
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    existing = path.read_text(encoding="utf-8") if path.exists() else ""
+    if existing and not existing.endswith("\n"):
+        existing += "\n"
+    replace_file(path, (existing + line).encode("utf-8"))
+
+
 def append_transaction(
     path: Path,
     text: str,
@@ -63,16 +72,14 @@ def append_transaction(
     existing = path.read_text(encoding="utf-8") if path.exists() else ""
     if existing and not existing.endswith("\n"):
         existing += "\n"
-    if formatter is not None and existing.strip() and not existing.endswith("\n\n"):
-        # Separate the new entry with a blank line before formatting so a
-        # trailing standalone comment is not glued onto the new transaction.
+    if existing and not existing.isspace() and not existing.endswith("\n\n"):
+        # Separate the new entry with a blank line so a trailing standalone
+        # comment is not glued onto the new transaction.
         existing += "\n"
     new_content = existing + text
     if formatter is not None:
         new_content = formatter(new_content)
-    tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(new_content, encoding="utf-8")
-    os.replace(tmp, path)
+    replace_file(path, new_content.encode("utf-8"))
 
 
 def replace_file(path: Path, content: bytes) -> None:
@@ -147,7 +154,7 @@ def ensure_included(
     Integrates whatever path it is given; callers are responsible for
     validating it (validate_target_file) beforehand.
 
-    When `known_included` (realpaths from a recent baseline load) is provided
+    When `known_included` (realpaths from a prior cached load) is provided
     and `target` already exists on disk, a hit skips the extra full-ledger load.
     """
     if target.is_dir():
@@ -166,7 +173,7 @@ def ensure_included(
     if '"' in rel:
         raise ValueError("include path must not contain quotes")
     # Fast path: the exact line this function appends is already present, or
-    # a prior baseline load already saw this existing file in its include tree.
+    # a prior load already saw this existing file in its include tree.
     main_text = main.read_text() if main.exists() else ""
     if any(line.strip() == include_line for line in main_text.splitlines()):
         return
@@ -175,4 +182,4 @@ def ensure_included(
         return
     if target_real in included_files(str(main)):
         return
-    append_transaction(main, include_line + "\n")
+    _append_line(main, include_line + "\n")

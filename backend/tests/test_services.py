@@ -476,8 +476,6 @@ def test_preview_matches_beanfmt_workspace_config(session, tmp_ledger_config, to
 
 
 def test_confirm_formats_whole_written_file_and_sorts(session, tmp_ledger_config, today):
-    """Confirm formats the full target file with beanfmt, so pre-existing
-    entries are reformatted and file-level options like sort take effect."""
     root = Path(tmp_ledger_config.ledger_root)
     (root / ".beanfmt.toml").write_text('sort = "asc"\nindent = 4\n')
     target = root / "sprout.bean"
@@ -494,7 +492,6 @@ def test_confirm_formats_whole_written_file_and_sorts(session, tmp_ledger_config
     services.confirm_occurrence(session, tmp_ledger_config, occ.id)
 
     written = target.read_text()
-    # Both entries are indented with 4 spaces and sorted chronologically.
     assert "    Expenses:Subscription" in written
     assert written.index("2026-01-15") < written.index("2026-06-20")
     assert "\n\n2026-06-20" in written
@@ -518,8 +515,6 @@ def test_confirm_does_not_glue_trailing_comment_to_appended_entry(session, tmp_l
     services.confirm_occurrence(session, tmp_ledger_config, occ.id)
 
     written = target.read_text()
-    # A blank line separates the pre-existing trailing comment from the new
-    # entry so it is never glued onto the appended transaction.
     assert "; trailing file note\n\n2026-01-15" in written
 
 
@@ -1222,3 +1217,35 @@ def test_confirm_unlinks_newly_created_file_when_commit_fails(session, config, t
     assert not target.exists()
     session.refresh(occ)
     assert occ.status == "pending"
+
+
+def test_back_to_back_confirms_reuse_schema_cache(session, tmp_ledger_config, today, monkeypatch):
+    from unittest.mock import MagicMock
+    from beancount import loader
+    from app import ledger
+
+    # Include sprout.bean from main so writing to it mutates an included file.
+    main = tmp_ledger_config.ledger_main_file
+    with open(main, "a", encoding="utf-8") as f:
+        f.write('\ninclude "sprout.bean"\n')
+    ledger.clear_cache()
+
+    sch = _make_schedule(session)
+    services.materialize_occurrences(session, tmp_ledger_config, today)
+    occs = session.exec(
+        sqlmodel.select(Occurrence)
+        .where(Occurrence.schedule_id == sch.id)
+        .order_by(Occurrence.due_date)
+    ).all()
+
+    spy = MagicMock(wraps=loader.load_file)
+    monkeypatch.setattr(loader, "load_file", spy)
+
+    services.confirm_occurrence(session, tmp_ledger_config, occs[0].id)
+    services.confirm_occurrence(session, tmp_ledger_config, occs[1].id)
+    services.confirm_occurrence(session, tmp_ledger_config, occs[2].id)
+    assert spy.call_count == 1
+
+    ids = ledger.load_sprout_ids(main)
+    assert {occs[0].sprout_id, occs[1].sprout_id, occs[2].sprout_id}.issubset(ids)
+    assert spy.call_count == 2

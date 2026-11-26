@@ -1,7 +1,10 @@
 import os
+from unittest.mock import MagicMock
 
+from beancount import loader
 import pytest
 
+from app import ledger
 from app.ledger import ConflictError, find_transaction
 from app.ledger import load_accounts, load_currencies
 from app.ledger import validate_snippet
@@ -134,3 +137,186 @@ def test_find_transaction_duplicate_id_conflict(tmp_path):
     sub.write_text(sub.read_text() + "\n" + TXN.replace("2026-01-15", "2026-02-15"))
     with pytest.raises(ConflictError):
         find_transaction(str(main), "sch1-20260115")
+
+
+def test_cache_reuses_loaded_ledger_until_file_changes(tmp_path, monkeypatch):
+    main = tmp_path / "main.bean"
+    main.write_text(
+        "2020-01-01 open Assets:CreditCard\n"
+        "2020-01-01 open Expenses:Subscription\n"
+    )
+    ledger.clear_cache()
+
+    spy = MagicMock(wraps=loader.load_file)
+    monkeypatch.setattr(loader, "load_file", spy)
+
+    snippet = (
+        '2026-06-15 * "Spotify" "sub"\n'
+        "  Expenses:Subscription  15.00 USD\n"
+        "  Assets:CreditCard\n"
+    )
+    assert validate_snippet(str(main), snippet) == []
+    assert validate_snippet(str(main), snippet) == []
+    assert load_accounts(str(main)) == ["Assets:CreditCard", "Expenses:Subscription"]
+    assert included_files(str(main)) == {os.path.realpath(str(main))}
+    assert spy.call_count == 1
+
+    main.write_text(main.read_text() + "2020-01-01 open Expenses:Music\n")
+    assert "Expenses:Music" in load_accounts(str(main))
+    assert spy.call_count == 2
+
+
+def test_cache_invalidates_on_new_glob_included_file(tmp_path):
+    ledger.clear_cache()
+    txns_dir = tmp_path / "txns"
+    txns_dir.mkdir()
+    (txns_dir / "a.bean").write_text("2020-01-01 open Assets:A\n")
+    main = tmp_path / "main.bean"
+    main.write_text('include "txns/*.bean"\n')
+
+    assert load_accounts(str(main)) == ["Assets:A"]
+    assert os.path.realpath(str(txns_dir / "a.bean")) in included_files(str(main))
+
+    (txns_dir / "b.bean").write_text("2020-01-01 open Assets:B\n")
+    assert load_accounts(str(main)) == ["Assets:A", "Assets:B"]
+    assert os.path.realpath(str(txns_dir / "b.bean")) in included_files(str(main))
+
+
+def test_cache_invalidates_when_previously_missing_include_appears(tmp_path):
+    ledger.clear_cache()
+    main = tmp_path / "main.bean"
+    main.write_text(
+        "2020-01-01 open Assets:CreditCard\n"
+        "2020-01-01 open Expenses:Subscription\n"
+        'include "sprout.bean"\n'
+    )
+    assert ledger.load_sprout_ids(str(main)) == set()
+
+    (tmp_path / "sprout.bean").write_text(TXN)
+    assert ledger.load_sprout_ids(str(main)) == {"sch1-20260115"}
+
+
+def test_schema_cache_reloads_when_dirty_file_adds_open_directive(tmp_path, monkeypatch):
+    ledger.clear_cache()
+    txns = tmp_path / "txns.bean"
+    txns.write_text(TXN)
+    main = tmp_path / "main.bean"
+    main.write_text(
+        "2020-01-01 open Assets:CreditCard\n"
+        "2020-01-01 open Expenses:Subscription\n"
+        'include "txns.bean"\n'
+    )
+
+    spy = MagicMock(wraps=loader.load_file)
+    monkeypatch.setattr(loader, "load_file", spy)
+
+    assert load_accounts(str(main)) == ["Assets:CreditCard", "Expenses:Subscription"]
+    assert spy.call_count == 1
+
+    # Appending another transaction advances schema state without full reload.
+    txns.write_text(txns.read_text() + "\n" + TXN.replace("2026-01-15", "2026-02-15"))
+    assert load_accounts(str(main)) == ["Assets:CreditCard", "Expenses:Subscription"]
+    assert spy.call_count == 1
+
+    # Adding an Open directive in the same file triggers a full reload.
+    txns.write_text(txns.read_text() + "\n2020-01-01 open Expenses:Music\n")
+    assert "Expenses:Music" in load_accounts(str(main))
+    assert spy.call_count == 2
+
+
+def test_fast_validate_catches_closed_future_currency_syntax_and_missing_legs(tmp_path):
+    main = tmp_path / "main.bean"
+    main.write_text(
+        "2020-01-01 open Assets:CreditCard USD\n"
+        "2020-01-01 open Expenses:Subscription\n"
+        "2020-01-01 open Assets:OldBank\n"
+        "2025-01-01 close Assets:OldBank\n"
+        "2026-07-01 open Assets:FutureBank\n"
+    )
+
+    closed = (
+        '2026-06-15 * "X" "y"\n'
+        "  Expenses:Subscription  15.00 USD\n"
+        "  Assets:OldBank\n"
+    )
+    assert any("inactive" in e for e in validate_snippet(str(main), closed))
+
+    future = (
+        '2026-06-15 * "X" "y"\n'
+        "  Expenses:Subscription  15.00 USD\n"
+        "  Assets:FutureBank\n"
+    )
+    assert any("inactive" in e for e in validate_snippet(str(main), future))
+
+    wrong_ccy = (
+        '2026-06-15 * "X" "y"\n'
+        "  Expenses:Subscription  15.00 EUR\n"
+        "  Assets:CreditCard\n"
+    )
+    assert any("Invalid currency" in e for e in validate_snippet(str(main), wrong_ccy))
+
+    two_missing = (
+        '2026-06-15 * "X" "y"\n'
+        "  Expenses:Subscription\n"
+        "  Assets:CreditCard\n"
+    )
+    assert validate_snippet(str(main), two_missing)
+
+    bad_syntax = '2026-99-99 * "X" "y"\n  Expenses:Subscription  15.00 USD\n'
+    assert validate_snippet(str(main), bad_syntax)
+
+
+def test_fast_validate_honors_custom_root_account_names(tmp_path):
+    main = tmp_path / "main.bean"
+    main.write_text(
+        'option "name_assets" "Zichan"\n'
+        "2020-01-01 open Zichan:Bank\n"
+        "2020-01-01 open Expenses:Food\n"
+    )
+    snippet = (
+        '2026-06-15 * "Lunch" "noodles"\n'
+        "  Expenses:Food  20.00 CNY\n"
+        "  Zichan:Bank\n"
+    )
+    assert validate_snippet(str(main), snippet) == []
+
+
+def test_fast_validate_honors_auto_accounts_plugin(tmp_path):
+    main = tmp_path / "main.bean"
+    main.write_text(
+        'plugin "beancount.plugins.auto_accounts"\n'
+        "2020-01-01 open Assets:Old\n"
+        "2025-01-01 close Assets:Old\n"
+    )
+    new_accts = (
+        '2026-06-15 * "X" "y"\n'
+        "  Expenses:BrandNew  10.00 USD\n"
+        "  Assets:BrandNew\n"
+    )
+    assert validate_snippet(str(main), new_accts) == []
+
+    closed_acct = (
+        '2026-06-15 * "X" "y"\n'
+        "  Expenses:BrandNew  10.00 USD\n"
+        "  Assets:Old\n"
+    )
+    assert any("inactive" in e for e in validate_snippet(str(main), closed_acct))
+
+
+def test_fast_validate_supports_cost_lot_reduction(tmp_path):
+    main = tmp_path / "main.bean"
+    main.write_text(
+        "2020-01-01 open Assets:Broker\n"
+        "2020-01-01 open Assets:Cash\n"
+        "2020-01-01 open Income:PnL\n"
+        '2020-02-01 * "Buy"\n'
+        "  Assets:Broker  10 AAPL {100.00 USD}\n"
+        "  Assets:Cash   -1000.00 USD\n"
+    )
+    sell = (
+        '2026-06-15 * "Sell"\n'
+        "  Assets:Broker  -5 AAPL {} @ 120.00 USD\n"
+        "  Assets:Cash     600.00 USD\n"
+        "  Income:PnL\n"
+    )
+    assert validate_snippet(str(main), sell) == []

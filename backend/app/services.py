@@ -407,8 +407,8 @@ def render_occurrence(
 
 
 def _ledger_workspace(config: AppConfig) -> Optional[Path]:
-    """Directory beanfmt config discovery starts from — the same root all
-    writes resolve against. None when no ledger is configured."""
+    """Ledger root directory (same root all writes resolve against), or None
+    when no ledger is configured."""
     if config.ledger_root or config.ledger_main_file:
         return resolve_root(config)
     return None
@@ -423,8 +423,7 @@ def _config_workspace(config: AppConfig, target: Optional[Path] = None) -> Optio
     if target is None or root is None:
         return root
     root_resolved = root.resolve()
-    cur = target.parent
-    while cur != cur.parent:
+    for cur in target.parents:
         if cur.is_dir():
             try:
                 if cur.resolve().is_relative_to(root_resolved):
@@ -432,7 +431,6 @@ def _config_workspace(config: AppConfig, target: Optional[Path] = None) -> Optio
             except OSError:
                 pass
             break
-        cur = cur.parent
     return root
 
 
@@ -442,9 +440,8 @@ def render_formatted(
     target: Optional[Path] = None,
     **transient,
 ) -> str:
-    """render_occurrence plus the beanfmt pass. The formatted text is what
-    gets validated and written, so every preview/write path must go through
-    here rather than calling render_occurrence directly."""
+    """render_occurrence plus the beanfmt pass. Used for previews (writes
+    re-format the whole target file after appending)."""
     text = render_occurrence(occ, sch, effective_postings=effective_postings, **transient)
     return apply_beanfmt(text, _config_workspace(config, target))
 
@@ -547,7 +544,7 @@ def confirm_occurrence(
 
     eff_date, _narration = _effective_meta(occ, sch)
     path = target_path(config, eff_date, target_file=tf)
-    text = render_formatted(occ, sch, config, effective_postings=effective, target=path)
+    text = render_occurrence(occ, sch, effective_postings=effective)
     snippet_errors, known_included = validate_snippet_with_includes(config.ledger_main_file, text)
     if snippet_errors:
         raise ValueError("; ".join(snippet_errors))
@@ -663,7 +660,7 @@ def readd_occurrence(session: Session, config: AppConfig, occurrence_id: int) ->
     path = target_path(config, eff_date, target_file=tf)
     postings = resolve_postings(sch, occ)
     effective = _validate_effective(postings, _merged_overrides(occ, None))
-    text = render_formatted(occ, sch, config, effective_postings=effective, target=path)
+    text = render_occurrence(occ, sch, effective_postings=effective)
 
     if _id_in_target_file(path, occ.sprout_id):
         raise ConflictError(
