@@ -66,6 +66,29 @@ def test_append_creates_and_appends(tmp_path):
     assert not list(p.parent.glob("*.tmp"))  # no leftover temp file
 
 
+def test_append_with_formatter_separates_and_formats_whole_file(tmp_path):
+    p = tmp_path / "sprout.bean"
+    p.write_text("; standalone header comment\n")
+    seen: list[str] = []
+
+    def fake_fmt(content: str) -> str:
+        seen.append(content)
+        return content.upper()
+
+    append_transaction(p, "entry-a\n", formatter=fake_fmt)
+    assert seen == ["; standalone header comment\n\nentry-a\n"]
+    assert p.read_text() == "; STANDALONE HEADER COMMENT\n\nENTRY-A\n"
+    assert not list(tmp_path.glob("*.tmp"))
+
+
+def test_append_with_formatter_empty_file_no_leading_blank(tmp_path):
+    p = tmp_path / "sprout.bean"
+    seen: list[str] = []
+    append_transaction(p, "entry-a\n", formatter=lambda c: (seen.append(c), c)[1])
+    assert seen == ["entry-a\n"]
+    assert p.read_text() == "entry-a\n"
+
+
 def test_validate_target_file_accepts_nested(tmp_path):
     cfg = _cfg(tmp_path)
     assert validate_target_file(cfg, "loans/mortgage.bean") == "loans/mortgage.bean"

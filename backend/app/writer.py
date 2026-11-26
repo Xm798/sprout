@@ -1,3 +1,4 @@
+from collections.abc import Callable
 import datetime
 import os
 from pathlib import Path
@@ -51,15 +52,26 @@ def validate_target_file(config: AppConfig, value: str | None) -> str | None:
     return p.as_posix()
 
 
-def append_transaction(path: Path, text: str) -> None:
+def append_transaction(
+    path: Path,
+    text: str,
+    *,
+    formatter: Callable[[str], str] | None = None,
+) -> None:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    existing = path.read_text() if path.exists() else ""
+    existing = path.read_text(encoding="utf-8") if path.exists() else ""
     if existing and not existing.endswith("\n"):
         existing += "\n"
+    if formatter is not None and existing.strip() and not existing.endswith("\n\n"):
+        # Separate the new entry with a blank line before formatting so a
+        # trailing standalone comment is not glued onto the new transaction.
+        existing += "\n"
     new_content = existing + text
+    if formatter is not None:
+        new_content = formatter(new_content)
     tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(new_content)
+    tmp.write_text(new_content, encoding="utf-8")
     os.replace(tmp, path)
 
 

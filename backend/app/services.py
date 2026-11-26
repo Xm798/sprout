@@ -414,15 +414,53 @@ def _ledger_workspace(config: AppConfig) -> Optional[Path]:
     return None
 
 
+def _config_workspace(config: AppConfig, target: Optional[Path] = None) -> Optional[Path]:
+    """Nearest existing directory inside the ledger root for `target`, falling
+    back to `_ledger_workspace(config)`. Lets a subdirectory `.beanfmt.toml`
+    (e.g. under `transactions/2026/`) override the root config without ever
+    escaping the ledger root when `target` hasn't been created yet."""
+    root = _ledger_workspace(config)
+    if target is None or root is None:
+        return root
+    root_resolved = root.resolve()
+    cur = target.parent
+    while cur != cur.parent:
+        if cur.is_dir():
+            try:
+                if cur.resolve().is_relative_to(root_resolved):
+                    return cur
+            except OSError:
+                pass
+            break
+        cur = cur.parent
+    return root
+
+
 def render_formatted(
     occ: Occurrence, sch: Schedule, config: AppConfig, *,
-    effective_postings: list[Posting], **transient,
+    effective_postings: list[Posting],
+    target: Optional[Path] = None,
+    **transient,
 ) -> str:
     """render_occurrence plus the beanfmt pass. The formatted text is what
     gets validated and written, so every preview/write path must go through
     here rather than calling render_occurrence directly."""
     text = render_occurrence(occ, sch, effective_postings=effective_postings, **transient)
-    return apply_beanfmt(text, _ledger_workspace(config))
+    return apply_beanfmt(text, _config_workspace(config, target))
+
+
+def _preview_target(
+    occ: Occurrence, sch: Schedule, config: AppConfig,
+    override_date: Optional[datetime.date] = None,
+) -> Optional[Path]:
+    if _ledger_workspace(config) is None:
+        return None
+    try:
+        tf = validate_target_file(config, sch.target_file)
+    except ValueError:
+        return None
+    eff_date, _ = _effective_meta(occ, sch, override_date=override_date)
+    return target_path(config, eff_date, target_file=tf)
 
 
 def build_preview(session: Session, config: AppConfig, occurrence_id: int, **transient) -> str:
@@ -437,21 +475,29 @@ def build_preview(session: Session, config: AppConfig, occurrence_id: int, **tra
     # stale stored keys must error too, not just incoming ones.
     merged = _merged_overrides(occ, transient.get("override_amounts"))
     effective = _validate_effective(postings, merged)
-    return render_formatted(occ, sch, config, effective_postings=effective, **{
+    target = _preview_target(occ, sch, config, override_date=transient.get("override_date"))
+    return render_formatted(occ, sch, config, effective_postings=effective, target=target, **{
         k: v for k, v in transient.items() if k != "override_amounts"
     })
 
 
-def _append_and_commit(session: Session, occ: Occurrence, path: Path, text: str) -> Occurrence:
-    """Append ``text`` to ``path`` and commit ``occ`` to the database.
+def _append_and_commit(
+    session: Session, occ: Occurrence, path: Path, text: str, config: AppConfig,
+) -> Occurrence:
+    """Append ``text`` to ``path``, format the written file with beanfmt, and
+    commit ``occ`` to the database.
 
     Snapshots ``path`` right before writing so a failed DB commit restores the
-    file to its prior state instead of leaving an orphaned transaction on disk
-    while the occurrence stays uncommitted in the DB.
+    file to its prior state instead of leaving an orphaned transaction (or
+    reformatted content) on disk while the occurrence stays uncommitted.
     """
     existed = path.exists()
     snapshot = path.read_bytes() if existed else None
-    append_transaction(path, text)
+    append_transaction(
+        path,
+        text,
+        formatter=lambda content: apply_beanfmt(content, _config_workspace(config, path)),
+    )
     try:
         session.add(occ)
         session.commit()
@@ -499,13 +545,13 @@ def confirm_occurrence(
     # was saved must not let the write escape the ledger root.
     tf = validate_target_file(config, sch.target_file)
 
-    text = render_formatted(occ, sch, config, effective_postings=effective)
+    eff_date, _narration = _effective_meta(occ, sch)
+    path = target_path(config, eff_date, target_file=tf)
+    text = render_formatted(occ, sch, config, effective_postings=effective, target=path)
     snippet_errors, known_included = validate_snippet_with_includes(config.ledger_main_file, text)
     if snippet_errors:
         raise ValueError("; ".join(snippet_errors))
 
-    eff_date, _narration = _effective_meta(occ, sch)
-    path = target_path(config, eff_date, target_file=tf)
     # A copy of this id surviving in the target file (e.g. orphaned by a lost
     # include, then unconfirmed as "missing") must not be silently duplicated
     # by a re-confirm. Checked before ensure_included so a refused confirm
@@ -523,7 +569,7 @@ def confirm_occurrence(
     occ.status = "confirmed"
     occ.written_path = str(path)
     occ.confirmed_at = datetime.datetime.now()
-    return _append_and_commit(session, occ, path, text)
+    return _append_and_commit(session, occ, path, text, config)
 
 
 def skip_occurrence(session: Session, occurrence_id: int) -> Occurrence:
@@ -613,12 +659,12 @@ def readd_occurrence(session: Session, config: AppConfig, occurrence_id: int) ->
     # at write time) so re-add restores into the same destination.
     tf = validate_target_file(config, sch.target_file)
 
-    postings = resolve_postings(sch, occ)
-    effective = _validate_effective(postings, _merged_overrides(occ, None))
-    text = render_formatted(occ, sch, config, effective_postings=effective)
-
     eff_date, _narration = _effective_meta(occ, sch)
     path = target_path(config, eff_date, target_file=tf)
+    postings = resolve_postings(sch, occ)
+    effective = _validate_effective(postings, _merged_overrides(occ, None))
+    text = render_formatted(occ, sch, config, effective_postings=effective, target=path)
+
     if _id_in_target_file(path, occ.sprout_id):
         raise ConflictError(
             f"transaction {occ.sprout_id} already exists in {path} but is not "
@@ -633,7 +679,7 @@ def readd_occurrence(session: Session, config: AppConfig, occurrence_id: int) ->
 
     occ.written_path = str(path)
     occ.confirmed_at = datetime.datetime.now()
-    return _append_and_commit(session, occ, path, text)
+    return _append_and_commit(session, occ, path, text, config)
 
 
 def get_written_transaction(session: Session, config: AppConfig, occurrence_id: int) -> tuple[str, str]:

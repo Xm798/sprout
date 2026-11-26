@@ -475,6 +475,96 @@ def test_preview_matches_beanfmt_workspace_config(session, tmp_ledger_config, to
     assert "      Expenses:Subscription" in text
 
 
+def test_confirm_formats_whole_written_file_and_sorts(session, tmp_ledger_config, today):
+    """Confirm formats the full target file with beanfmt, so pre-existing
+    entries are reformatted and file-level options like sort take effect."""
+    root = Path(tmp_ledger_config.ledger_root)
+    (root / ".beanfmt.toml").write_text('sort = "asc"\nindent = 4\n')
+    target = root / "sprout.bean"
+    target.write_text(
+        "; header comment\n"
+        '2026-06-20 * "Later" "manual"\n'
+        "  Expenses:Subscription  5.00 USD\n"
+        "  Assets:CreditCard\n"
+    )
+    sch = _make_schedule(session)
+    services.materialize_occurrences(session, tmp_ledger_config, today)
+    occ = _first_occ(session, sch)  # 2026-01-15, earlier than 2026-06-20
+
+    services.confirm_occurrence(session, tmp_ledger_config, occ.id)
+
+    written = target.read_text()
+    # Both entries are indented with 4 spaces and sorted chronologically.
+    assert "    Expenses:Subscription" in written
+    assert written.index("2026-01-15") < written.index("2026-06-20")
+    assert "\n\n2026-06-20" in written
+
+
+def test_confirm_does_not_glue_trailing_comment_to_appended_entry(session, tmp_ledger_config, today):
+    root = Path(tmp_ledger_config.ledger_root)
+    (root / ".beanfmt.toml").write_text('sort = "asc"\n')
+    target = root / "sprout.bean"
+    target.write_text(
+        '2026-06-20 * "Later" "manual"\n'
+        "  Expenses:Subscription  5.00 USD\n"
+        "  Assets:CreditCard\n"
+        "\n"
+        "; trailing file note\n"
+    )
+    sch = _make_schedule(session)
+    services.materialize_occurrences(session, tmp_ledger_config, today)
+    occ = _first_occ(session, sch)  # 2026-01-15
+
+    services.confirm_occurrence(session, tmp_ledger_config, occ.id)
+
+    written = target.read_text()
+    # A blank line separates the pre-existing trailing comment from the new
+    # entry so it is never glued onto the appended transaction.
+    assert "; trailing file note\n\n2026-01-15" in written
+
+
+def test_confirm_and_preview_honor_subdir_beanfmt_config(session, tmp_ledger_config, today):
+    root = Path(tmp_ledger_config.ledger_root)
+    (root / ".beanfmt.toml").write_text("indent = 2\n")
+    sub = root / "nested"
+    sub.mkdir()
+    (sub / ".beanfmt.toml").write_text("indent = 6\n")
+    sch = _make_schedule(session)
+    sch.target_file = "nested/sub.bean"
+    session.add(sch)
+    session.commit()
+    services.materialize_occurrences(session, tmp_ledger_config, today)
+    occ = _first_occ(session, sch)
+
+    preview = services.build_preview(session, tmp_ledger_config, occ.id)
+    assert "      Expenses:Subscription" in preview
+
+    services.confirm_occurrence(session, tmp_ledger_config, occ.id)
+    written = (sub / "sub.bean").read_text()
+    assert "      Expenses:Subscription" in written
+
+
+def test_confirm_invalid_beanfmt_config_falls_back_cleanly(session, tmp_ledger_config, today):
+    root = Path(tmp_ledger_config.ledger_root)
+    (root / ".beanfmt.toml").write_text("indent = [broken\n")
+    target = root / "sprout.bean"
+    target.write_text(
+        '2026-06-20 * "Existing" "manual"\n'
+        "  Expenses:Subscription  5.00 USD\n"
+        "  Assets:CreditCard\n"
+    )
+    sch = _make_schedule(session)
+    services.materialize_occurrences(session, tmp_ledger_config, today)
+    occ = _first_occ(session, sch)
+
+    services.confirm_occurrence(session, tmp_ledger_config, occ.id)
+
+    written = target.read_text()
+    assert '2026-06-20 * "Existing" "manual"' in written
+    assert f'sprout-id: "{occ.sprout_id}"' in written
+    assert "\n\n2026-01-15" in written
+
+
 def test_confirm_rejects_target_file_escaping_root(session, tmp_ledger_config, today):
     sch = _make_schedule(session)
     sch.target_file = "../escape.bean"  # bypassed router validation (e.g. old DB row)

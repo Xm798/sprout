@@ -131,6 +131,26 @@ def test_readd_restores_missing_transaction(client, tmp_path):
     assert client.get("/api/history/check").json()["missing"] == []
 
 
+def test_readd_formats_whole_target_file(client, tmp_path):
+    (tmp_path / ".beanfmt.toml").write_text('sort = "asc"\nindent = 4\n')
+    occ = _seeded_inbox(client)[0]  # 2026-01-15
+    confirmed = client.post(f"/api/inbox/{occ['id']}/confirm", json={}).json()
+    ledger = tmp_path / "sprout.bean"
+
+    # Replace the file with an unformatted later entry so the confirmed one is missing.
+    ledger.write_text(
+        '2026-06-20 * "Later" "manual"\n'
+        "  Expenses:Subscription  5.00 USD\n"
+        "  Assets:CreditCard\n"
+    )
+    r = client.post(f"/api/history/{occ['id']}/readd")
+    assert r.status_code == 200, r.text
+    written = ledger.read_text()
+    assert confirmed["sprout_id"] in written
+    assert "    Expenses:Subscription" in written
+    assert written.index("2026-01-15") < written.index("2026-06-20")
+
+
 def test_readd_honors_schedule_target_file(client, tmp_path):
     """Re-add must restore into the schedule's target_file, not the global
     write-strategy file."""
